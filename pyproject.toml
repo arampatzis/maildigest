@@ -1,0 +1,42 @@
+[project]
+name = "maildigest"
+version = "0.2.0"
+description = "Summarise university newsletters daily with Claude AI"
+authors = [{ name = "Georgios Arampatzis", email = "georgios.arampatzis@uoc.gr" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.28.0",
+    "pyyaml>=6.0",
+    "keyring>=25.0",
+    "click>=8.0",
+    "markdown>=3.6",
+]
+
+[project.scripts]
+maildigest = "maildigest.cli:main"
+
+[tool.poetry]
+packages = [{ include = "maildigest" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-mock = "^3.14"
+pytest-cov = "^5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["maildigest"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "if __name__ == .__main__.:",
+]

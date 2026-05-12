@@ -1,0 +1,87 @@
+# maildigest configuration
+# Copy this file to ~/.config/maildigest/config.yaml and fill in your settings.
+# Run `maildigest setup-credentials` to store passwords in the system keychain.
+
+# Where markdown summary files are saved.
+# Each mailbox gets its own subdirectory: <summary_dir>/<mailbox_name>/
+summary_dir: ~/Documents/NewsletterSummaries
+
+mailboxes:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Example 1: University newsletters — Monday-to-Friday, summarised in Greek
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: uoc_newsletters          # machine name — used in keychain and filenames
+    label: "UOC Newsletters"       # display name shown in logs and email subjects
+
+    enabled: true                  # set to false to temporarily skip this mailbox
+
+    imap:
+      server: imap.uoc.gr
+      port: 993                    # default: 993
+      email: user@uoc.gr
+      folder: UOC-filtered.News    # IMAP folder to read from
+
+    smtp:
+      server: smtp.uoc.gr
+      port: 587                    # default: 587
+      # The digest is sent from/to imap.email (send-to-self).
+      # Passwords are stored in the keychain — never here.
+
+    schedule:
+      # Days this mailbox should be processed.
+      # Options: daily  OR  a list from: mon tue wed thu fri sat sun
+      days: [mon, tue, wed, thu, fri]
+
+    summarizer:
+      language: Greek              # language for the Claude summary output
+
+      # Bullet points appended to the prompt — Claude will pay extra attention.
+      focus_areas:
+        - grant calls and funding deadlines
+        - events and seminars
+        - administrative announcements
+
+      # Optional free-form instruction added to the prompt.
+      extra_instructions: "Ignore social event promotions and advertisements."
+
+      # Optional: replace the entire built-in prompt with your own.
+      # When set, language / focus_areas / extra_instructions are ignored.
+      # custom_prompt: |
+      #   Summarise the following emails in three bullet points.
+
+    # Optional: only process emails whose From field contains one of these strings.
+    # Useful when the folder also receives non-newsletter mail.
+    # sender_filter:
+    #   - "@uoc.gr"
+    #   - "newsletter"
+
+    # Optional: per-mailbox body character limit (default 3000).
+    # body_char_limit: 3000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Example 2: Personal subscriptions — weekly on Monday, in English
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: personal_newsletters
+    label: "Personal Newsletters"
+
+    enabled: false                 # disabled by default — enable when ready
+
+    imap:
+      server: imap.gmail.com
+      port: 993
+      email: you@gmail.com
+      folder: Newsletters
+
+    smtp:
+      server: smtp.gmail.com
+      port: 587
+
+    schedule:
+      days: [mon]                  # weekly digest every Monday
+
+    summarizer:
+      language: English
+      focus_areas:
+        - product updates and new features
+        - industry news
