@@ -3,7 +3,7 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
@@ -211,20 +211,23 @@ def last_run_path(name: str) -> Path:
     return USER_CONFIG_DIR / f"last_run_{name}"
 
 
-def read_last_run(name: str) -> date | None:
+def read_last_run(name: str) -> datetime | None:
     path = last_run_path(name)
     if not path.exists():
         return None
     try:
-        return date.fromisoformat(path.read_text().strip())
+        text = path.read_text().strip()
+        if "T" in text:
+            return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S")
+        return datetime.combine(date.fromisoformat(text), datetime.min.time())
     except ValueError:
         log.warning("Could not parse last_run_%s; treating as first run.", name)
         return None
 
 
-def write_last_run(name: str, run_date: date) -> None:
+def write_last_run(name: str, dt: datetime) -> None:
     USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    last_run_path(name).write_text(run_date.isoformat())
+    last_run_path(name).write_text(dt.strftime("%Y-%m-%dT%H:%M:%S"))
 
 
 def store_credentials(

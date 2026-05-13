@@ -1,6 +1,6 @@
 """Tests for maildigest.config."""
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import patch
@@ -137,14 +137,14 @@ class TestLastRun:
 
     def test_write_then_read_round_trips(self, tmp_path, monkeypatch):
         monkeypatch.setattr("maildigest.config.USER_CONFIG_DIR", tmp_path)
-        d = date(2026, 5, 9)
-        write_last_run("mybox", d)
-        assert read_last_run("mybox") == d
+        dt = datetime(2026, 5, 9, 17, 0, 34)
+        write_last_run("mybox", dt)
+        assert read_last_run("mybox") == dt
 
     def test_write_creates_directory(self, tmp_path, monkeypatch):
         nested = tmp_path / "a" / "b"
         monkeypatch.setattr("maildigest.config.USER_CONFIG_DIR", nested)
-        write_last_run("mybox", date(2026, 5, 9))
+        write_last_run("mybox", datetime(2026, 5, 9, 9, 0, 0))
         assert (nested / "last_run_mybox").exists()
 
     def test_corrupt_file_returns_none(self, tmp_path, monkeypatch):
@@ -154,14 +154,26 @@ class TestLastRun:
 
     def test_separate_names_independent(self, tmp_path, monkeypatch):
         monkeypatch.setattr("maildigest.config.USER_CONFIG_DIR", tmp_path)
-        write_last_run("box_a", date(2026, 5, 1))
-        write_last_run("box_b", date(2026, 5, 9))
-        assert read_last_run("box_a") == date(2026, 5, 1)
-        assert read_last_run("box_b") == date(2026, 5, 9)
+        write_last_run("box_a", datetime(2026, 5, 1, 10, 0, 0))
+        write_last_run("box_b", datetime(2026, 5, 9, 17, 0, 0))
+        assert read_last_run("box_a") == datetime(2026, 5, 1, 10, 0, 0)
+        assert read_last_run("box_b") == datetime(2026, 5, 9, 17, 0, 0)
 
     def test_last_run_path_uses_name(self, tmp_path, monkeypatch):
         monkeypatch.setattr("maildigest.config.USER_CONFIG_DIR", tmp_path)
         assert last_run_path("mybox") == tmp_path / "last_run_mybox"
+
+    def test_old_date_only_format_parsed_as_midnight(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("maildigest.config.USER_CONFIG_DIR", tmp_path)
+        (tmp_path / "last_run_mybox").write_text("2026-05-12")
+        result = read_last_run("mybox")
+        assert result == datetime(2026, 5, 12, 0, 0, 0)
+
+    def test_stored_format_has_seconds_no_microseconds(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("maildigest.config.USER_CONFIG_DIR", tmp_path)
+        write_last_run("mybox", datetime(2026, 5, 9, 17, 0, 34, 123456))
+        text = (tmp_path / "last_run_mybox").read_text()
+        assert text == "2026-05-09T17:00:34"
 
 
 # ---------------------------------------------------------------------------

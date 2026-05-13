@@ -5,7 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, time as dt_time
 from pathlib import Path
 
 import click
@@ -22,7 +22,7 @@ from maildigest.config import (
     store_credentials,
     write_last_run,
 )
-from maildigest.fetcher import fetch_todays_emails
+from maildigest.fetcher import fetch_emails
 from maildigest.notifier import (
     save_to_markdown,
     send_email_summary,
@@ -34,7 +34,6 @@ log = logging.getLogger(__name__)
 _PLIST_LABEL = "com.user.maildigest"
 _LAUNCHAGENTS = Path.home() / "Library" / "LaunchAgents"
 _LAUNCHD_LOG_DIR = Path.home() / "Library" / "Logs" / "maildigest"
-_LAUNCHD_DOMAIN = f"gui/{os.getuid()}"
 _LAUNCHD_DOMAIN = f"gui/{os.getuid()}"
 
 
@@ -48,7 +47,14 @@ def setup_logging(debug: bool) -> None:
     logging.basicConfig(level=level, format=fmt, datefmt="%H:%M:%S")
 
 
-def _build_plist(digest_bin: str, hour: int, minute: int) -> str:
+def _build_plist(digest_bin: str, times: list[tuple[int, int]]) -> str:
+    interval_dicts = "\n".join(
+        f"        <dict>\n"
+        f"            <key>Hour</key><integer>{h}</integer>\n"
+        f"            <key>Minute</key><integer>{m}</integer>\n"
+        f"        </dict>"
+        for h, m in times
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,21 +69,16 @@ def _build_plist(digest_bin: str, hour: int, minute: int) -> str:
         <string>run</string>
     </array>
 
-    <!-- Run every day at {hour:02d}:{minute:02d} local time -->
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>{hour}</integer>
-        <key>Minute</key>
-        <integer>{minute}</integer>
-    </dict>
+    <array>
+{interval_dicts}
+    </array>
 
     <key>StandardOutPath</key>
     <string>{_LAUNCHD_LOG_DIR}/output.log</string>
     <key>StandardErrorPath</key>
     <string>{_LAUNCHD_LOG_DIR}/error.log</string>
 
-    <!-- Do NOT re-run immediately on login if the schedule was missed -->
     <key>RunAtLoad</key>
     <false/>
 </dict>
@@ -113,20 +114,20 @@ def main(ctx: click.Context, debug: bool) -> None:
 
 @main.command()
 @click.option(
-    "--from", "start_date",
-    type=click.DateTime(formats=["%Y-%m-%d"]),
+    "--from", "from_arg",
+    type=click.DateTime(formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M"]),
     default=None,
-    help="Start date (YYYY-MM-DD). Defaults to day after last run.",
+    help="Start datetime (YYYY-MM-DD or YYYY-MM-DDTHH:MM). Defaults to last run time.",
 )
 @click.option(
-    "--to", "end_date",
-    type=click.DateTime(formats=["%Y-%m-%d"]),
+    "--to", "to_arg",
+    type=click.DateTime(formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M"]),
     default=None,
-    help="End date (YYYY-MM-DD). Defaults to today.",
+    help="End datetime (YYYY-MM-DD or YYYY-MM-DDTHH:MM). Defaults to now.",
 )
 @click.option(
     "--force", is_flag=True, default=False,
-    help="Re-run today even if already up to date.",
+    help="Re-run from start of today even if already up to date.",
 )
 @click.option(
     "--dry-run", "dry_run", is_flag=True, default=False,
@@ -137,13 +138,13 @@ def main(ctx: click.Context, debug: bool) -> None:
     help="Process only this mailbox (by name).",
 )
 def run(
-    start_date: click.DateTime | None,
-    end_date: click.DateTime | None,
+    from_arg: datetime | None,
+    to_arg: datetime | None,
     force: bool,
     dry_run: bool,
     mailbox_filter: str | None,
 ) -> None:
-    """Fetch and summarise newsletters for configured mailboxes."""
+    """Fetch and summarise emails for configured mailboxes."""
     try:
         cfg = load_config()
     except Exception as exc:
@@ -162,14 +163,16 @@ def run(
                 param_hint="--mailbox",
             )
 
-    # Resolve and validate date range once, before the per-mailbox loop.
-    fixed_end = end_date.date() if end_date is not None else today
-    if start_date is not None:
-        fixed_start: date | None = start_date.date()
-        if fixed_start > fixed_end:
-            raise click.BadParameter(f"--from {fixed_start} is after --to {fixed_end}.")
-    else:
-        fixed_start = None
+    # Resolve explicit --from / --to once before the per-mailbox loop.
+    explicit_mode = from_arg is not None or to_arg is not None
+    if explicit_mode:
+        fixed_to: datetime = to_arg if to_arg is not None else datetime.combine(today, dt_time(23, 59, 59))
+        # date-only --to (midnight) → end of that day
+        if to_arg is not None and to_arg.time() == dt_time.min:
+            fixed_to = to_arg.replace(hour=23, minute=59, second=59)
+        fixed_from: datetime = from_arg if from_arg is not None else datetime.combine(today, dt_time.min)
+        if fixed_from > fixed_to:
+            raise click.BadParameter(f"--from {fixed_from} is after --to {fixed_to}.")
 
     if dry_run:
         log.info("Dry-run mode — summaries printed but not saved or emailed.")
@@ -177,8 +180,9 @@ def run(
     failed: list[str] = []
     for mb in mailboxes:
         try:
-            if fixed_start is not None:
-                start, end = fixed_start, fixed_end
+            if explicit_mode:
+                from_dt = fixed_from
+                to_dt = fixed_to
             else:
                 if not is_scheduled_today(mb) and not force:
                     log.info(
@@ -186,69 +190,65 @@ def run(
                         mb.label, today.strftime("%a"),
                     )
                     continue
-                last = read_last_run(mb.name)
-                start = (last + timedelta(days=1)) if last is not None else today
-                end = fixed_end
-                if start > end:
-                    if not force:
-                        log.info(
-                            "[%s] Already up to date (last run: %s).", mb.label, last
-                        )
-                        continue
-                    start = today
+                to_dt = datetime.now()
+                last_run_dt = read_last_run(mb.name)
+                if force or last_run_dt is None:
+                    from_dt = datetime.combine(today, dt_time.min)
+                else:
+                    from_dt = last_run_dt
 
-            days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
-            log.info(
-                "[%s] Processing %d day(s): %s → %s",
-                mb.label, len(days), start, end,
+            log.info("[%s] Fetching %s → %s", mb.label, from_dt, to_dt)
+
+            emails = fetch_emails(
+                imap_server=mb.imap_server,
+                imap_port=mb.imap_port,
+                email_address=mb.email,
+                email_password=mb.imap_password,
+                mail_folder=mb.imap_folder,
+                from_dt=from_dt,
+                to_dt=to_dt,
+                body_char_limit=mb.body_char_limit,
+                sender_filter=mb.sender_filter or None,
             )
 
-            for d in days:
-                log.info("[%s] ── %s ──", mb.label, d)
+            if not emails:
+                log.info("[%s] No new emails — skipping summary.", mb.label)
+                if not explicit_mode:
+                    write_last_run(mb.name, to_dt)
+                continue
 
-                emails = fetch_todays_emails(
-                    imap_server=mb.imap_server,
-                    imap_port=mb.imap_port,
-                    email_address=mb.email,
-                    email_password=mb.imap_password,
-                    mail_folder=mb.imap_folder,
-                    body_char_limit=mb.body_char_limit,
-                    sender_filter=mb.sender_filter or None,
-                    target_date=d,
-                )
+            summary = summarize_with_claude(
+                emails,
+                mailbox=mb,
+                api_key=cfg.anthropic_api_key,
+                target_date=to_dt.date(),
+            )
 
-                summary = summarize_with_claude(
-                    emails,
-                    mailbox=mb,
-                    api_key=cfg.anthropic_api_key,
-                    target_date=d,
-                )
+            click.echo(f"\n── [{mb.label}] Summary {to_dt.date()} " + "─" * 25)
+            click.echo(summary)
+            click.echo("─" * 55 + "\n")
 
-                click.echo(f"\n── [{mb.label}] Summary {d} " + "─" * 25)
-                click.echo(summary)
-                click.echo("─" * 55 + "\n")
+            if dry_run:
+                log.info("[%s] Dry run — skipped save and email.", mb.label)
+                continue
 
-                if dry_run:
-                    log.info("[%s] Dry run — skipped save and email.", mb.label)
-                    continue
+            log.info("[%s] Saving summary to disk …", mb.label)
+            path = save_to_markdown(summary, mb.summary_dir, mb.label, target_date=to_dt.date())
+            log.info("[%s] Saved → %s", mb.label, path)
 
-                log.info("[%s] Saving summary to disk …", mb.label)
-                path = save_to_markdown(summary, mb.summary_dir, mb.label, target_date=d)
-                log.info("[%s] Saved → %s", mb.label, path)
+            log.info("[%s] Emailing summary to %s …", mb.label, mb.email)
+            send_email_summary(
+                summary=summary,
+                smtp_server=mb.smtp_server,
+                smtp_port=mb.smtp_port,
+                email_address=mb.email,
+                email_password=mb.smtp_password,
+                label=mb.label,
+                target_date=to_dt.date(),
+            )
+            log.info("[%s] Email delivered.", mb.label)
 
-                log.info("[%s] Emailing summary to %s …", mb.label, mb.email)
-                send_email_summary(
-                    summary=summary,
-                    smtp_server=mb.smtp_server,
-                    smtp_port=mb.smtp_port,
-                    email_address=mb.email,
-                    email_password=mb.smtp_password,
-                    label=mb.label,
-                    target_date=d,
-                )
-                log.info("[%s] Email delivered.", mb.label)
-
-                write_last_run(mb.name, d)
+            write_last_run(mb.name, to_dt)
 
         except Exception as exc:
             log.error("[%s] Failed: %s", mb.label, exc)
@@ -368,24 +368,28 @@ def setup_credentials() -> None:
 
 @main.command()
 @click.option(
-    "--time", "run_time",
-    default="09:00",
+    "--time", "run_times",
+    multiple=True,
+    default=("09:00",),
     show_default=True,
-    help="Time to run in 24-hour HH:MM format.",
+    help="Time to run in 24-hour HH:MM format. Repeat to add multiple daily fires.",
 )
-def install(run_time: str) -> None:
+def install(run_times: tuple[str, ...]) -> None:
     """Schedule maildigest to run automatically via macOS launchd."""
     try:
-        try:
-            hour_str, minute_str = run_time.split(":")
-            hour, minute = int(hour_str), int(minute_str)
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                raise ValueError
-        except ValueError:
-            raise click.BadParameter(
-                "Expected HH:MM in 24-hour format (e.g. 09:00 or 13:40).",
-                param_hint="--time",
-            )
+        times: list[tuple[int, int]] = []
+        for run_time in run_times:
+            try:
+                hour_str, minute_str = run_time.split(":")
+                hour, minute = int(hour_str), int(minute_str)
+                if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                    raise ValueError
+            except ValueError:
+                raise click.BadParameter(
+                    "Expected HH:MM in 24-hour format (e.g. 09:00 or 13:40).",
+                    param_hint="--time",
+                )
+            times.append((hour, minute))
 
         digest_bin = shutil.which("maildigest") or str(
             Path(sys.executable).parent / "maildigest"
@@ -399,10 +403,11 @@ def install(run_time: str) -> None:
                 _launchctl("bootout", _LAUNCHD_DOMAIN, str(plist_path))
             except subprocess.CalledProcessError:
                 pass  # job wasn't registered; safe to overwrite
-        plist_path.write_text(_build_plist(digest_bin, hour, minute))
+        plist_path.write_text(_build_plist(digest_bin, times))
         _launchctl("bootstrap", _LAUNCHD_DOMAIN, str(plist_path))
 
-        log.info("Scheduled: maildigest run daily at %s.", run_time)
+        times_str = ", ".join(run_times)
+        log.info("Scheduled: maildigest run daily at %s.", times_str)
         log.info("Plist:  %s", plist_path)
         log.info("Logs:   %s/output.log", _LAUNCHD_LOG_DIR)
     except Exception as exc:

@@ -12,26 +12,32 @@ _DOMAIN = f"gui/{os.getuid()}"
 
 class TestBuildPlist:
     def test_contains_digest_bin_path(self):
-        plist = _build_plist("/usr/local/bin/maildigest", 9, 0)
+        plist = _build_plist("/usr/local/bin/maildigest", [(9, 0)])
         assert "/usr/local/bin/maildigest" in plist
 
     def test_contains_run_argument(self):
-        plist = _build_plist("/usr/local/bin/maildigest", 9, 0)
+        plist = _build_plist("/usr/local/bin/maildigest", [(9, 0)])
         assert "<string>run</string>" in plist
 
     def test_correct_hour_and_minute(self):
-        plist = _build_plist("/usr/local/bin/maildigest", 8, 30)
+        plist = _build_plist("/usr/local/bin/maildigest", [(8, 30)])
         assert "<integer>8</integer>" in plist
         assert "<integer>30</integer>" in plist
 
     def test_contains_label(self):
-        plist = _build_plist("/usr/local/bin/maildigest", 9, 0)
+        plist = _build_plist("/usr/local/bin/maildigest", [(9, 0)])
         assert _PLIST_LABEL in plist
 
     def test_is_valid_xml(self):
         import xml.etree.ElementTree as ET
-        plist = _build_plist("/usr/local/bin/maildigest", 9, 0)
+        plist = _build_plist("/usr/local/bin/maildigest", [(9, 0)])
         ET.fromstring(plist)
+
+    def test_multiple_times_all_present(self):
+        plist = _build_plist("/usr/local/bin/maildigest", [(10, 0), (17, 30)])
+        assert plist.count("<integer>10</integer>") == 1
+        assert plist.count("<integer>17</integer>") == 1
+        assert plist.count("<integer>30</integer>") == 1
 
 
 def _mock_launchctl_ok(mock_run):
@@ -114,6 +120,24 @@ class TestInstallCommand:
 
         content = (tmp_path / f"{_PLIST_LABEL}.plist").read_text()
         assert "/opt/homebrew/bin/maildigest" in content
+
+    @patch("maildigest.cli.subprocess.run")
+    @patch("maildigest.cli.shutil.which")
+    def test_multiple_times_all_written_to_plist(
+        self, mock_which, mock_run, tmp_path, monkeypatch
+    ):
+        mock_which.return_value = "/usr/local/bin/maildigest"
+        _mock_launchctl_ok(mock_run)
+        monkeypatch.setattr("maildigest.cli._LAUNCHAGENTS", tmp_path)
+        monkeypatch.setattr("maildigest.cli._LAUNCHD_LOG_DIR", tmp_path / "logs")
+
+        result = CliRunner().invoke(main, ["install", "--time", "10:00", "--time", "17:30"])
+
+        assert result.exit_code == 0
+        content = (tmp_path / f"{_PLIST_LABEL}.plist").read_text()
+        assert "<integer>10</integer>" in content
+        assert "<integer>17</integer>" in content
+        assert "<integer>30</integer>" in content
 
     @patch("maildigest.cli.subprocess.run")
     @patch("maildigest.cli.shutil.which")
