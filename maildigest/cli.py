@@ -342,6 +342,14 @@ def setup_credentials() -> None:
         mailboxes_str = ", ".join(labels)
         click.echo(f"\nAccount: {email}  (used by: {mailboxes_str})")
 
+        if email.endswith("@gmail.com"):
+            click.echo(
+                "  Gmail requires an app password (not your account password).\n"
+                "  1. Go to: https://myaccount.google.com/apppasswords\n"
+                "  2. Create a new app password (name it e.g. 'maildigest')\n"
+                "  3. Enter the 16-character password below."
+            )
+
         has_imap = bool(_try_get_secret(f"imap:{email}"))
         if has_imap:
             click.echo("  IMAP: [already stored — press Enter to keep]")
