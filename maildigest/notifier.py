@@ -46,9 +46,7 @@ def send_email_summary(
 
     html = (
         "<html><body style='font-family:sans-serif;max-width:700px'>"
-        f"<h2>{label} — {date_fmt}</h2>"
-        + _md.markdown(summary)
-        + "</body></html>"
+        f"<h2>{label} — {date_fmt}</h2>" + _md.markdown(summary) + "</body></html>"
     )
     msg.attach(MIMEText(summary, "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
@@ -59,5 +57,3 @@ def send_email_summary(
         server.login(email_address, email_password)
         server.sendmail(email_address, email_address, msg.as_string())
     log.debug("Email delivered to %s.", email_address)
-
-

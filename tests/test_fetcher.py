@@ -36,6 +36,7 @@ def _multipart_bytes(subject: str, sender: str, body: str) -> bytes:
 def _encode_utf8_b64(text: str) -> str:
     """Produce a valid =?UTF-8?B?...?= encoded-word for testing."""
     import base64
+
     b64 = base64.b64encode(text.encode("utf-8")).decode()
     return f"=?UTF-8?B?{b64}?="
 
@@ -91,16 +92,18 @@ class TestExtractPlainText:
 class TestDecodePayload:
     def test_unknown_charset_falls_back_to_utf8(self):
         from maildigest.fetcher import _decode_payload
+
         msg = email.message_from_bytes(
             b"Content-Type: text/plain; charset=x-unknown\n"
             b"Content-Transfer-Encoding: base64\n\n"
-            + __import__("base64").b64encode("hello".encode("utf-8"))
+            + __import__("base64").b64encode(b"hello")
         )
         result = _decode_payload(msg)
         assert result == "hello"
 
     def test_empty_payload_returns_empty_string(self):
         from maildigest.fetcher import _decode_payload
+
         msg = email.message_from_string("Content-Type: text/plain\n\n")
         assert _decode_payload(msg) == ""
 
@@ -156,8 +159,13 @@ class TestFetchEmails:
         conn.fetch.return_value = (None, [(None, raw)])
 
         result = fetch_emails(
-            "imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-            from_dt=_FROM_DT, to_dt=_TO_DT,
+            "imap.test",
+            993,
+            "u@uni.edu",
+            "pwd",
+            "Inbox",
+            from_dt=_FROM_DT,
+            to_dt=_TO_DT,
         )
 
         assert len(result) == 1
@@ -173,8 +181,13 @@ class TestFetchEmails:
 
         with pytest.raises(ValueError, match="Could not open folder"):
             fetch_emails(
-                "imap.test", 993, "u@uni.edu", "pwd", "BadFolder",
-                from_dt=_FROM_DT, to_dt=_TO_DT,
+                "imap.test",
+                993,
+                "u@uni.edu",
+                "pwd",
+                "BadFolder",
+                from_dt=_FROM_DT,
+                to_dt=_TO_DT,
             )
 
     @patch("maildigest.fetcher.imaplib.IMAP4_SSL")
@@ -185,8 +198,13 @@ class TestFetchEmails:
         conn.search.return_value = (None, [b""])
 
         result = fetch_emails(
-            "imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-            from_dt=_FROM_DT, to_dt=_TO_DT,
+            "imap.test",
+            993,
+            "u@uni.edu",
+            "pwd",
+            "Inbox",
+            from_dt=_FROM_DT,
+            to_dt=_TO_DT,
         )
         assert result == []
 
@@ -200,8 +218,13 @@ class TestFetchEmails:
         conn.fetch.return_value = (None, [(None, raw)])
 
         result = fetch_emails(
-            "imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-            from_dt=_FROM_DT, to_dt=_TO_DT,
+            "imap.test",
+            993,
+            "u@uni.edu",
+            "pwd",
+            "Inbox",
+            from_dt=_FROM_DT,
+            to_dt=_TO_DT,
             body_char_limit=100,
         )
         assert len(result[0]["body"]) == 100
@@ -213,8 +236,15 @@ class TestFetchEmails:
         conn.select.return_value = ("OK", [None])
         conn.search.return_value = (None, [b""])
 
-        fetch_emails("imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-                     from_dt=_FROM_DT, to_dt=_TO_DT)
+        fetch_emails(
+            "imap.test",
+            993,
+            "u@uni.edu",
+            "pwd",
+            "Inbox",
+            from_dt=_FROM_DT,
+            to_dt=_TO_DT,
+        )
         conn.logout.assert_called_once()
 
     @patch("maildigest.fetcher.imaplib.IMAP4_SSL")
@@ -224,8 +254,15 @@ class TestFetchEmails:
         conn.select.return_value = ("NO", [None])
 
         with pytest.raises(ValueError):
-            fetch_emails("imap.test", 993, "u@uni.edu", "pwd", "BadFolder",
-                         from_dt=_FROM_DT, to_dt=_TO_DT)
+            fetch_emails(
+                "imap.test",
+                993,
+                "u@uni.edu",
+                "pwd",
+                "BadFolder",
+                from_dt=_FROM_DT,
+                to_dt=_TO_DT,
+            )
 
         conn.logout.assert_called_once()
 
@@ -238,8 +275,9 @@ class TestFetchEmails:
 
         from_dt = datetime(2026, 5, 6, 17, 0, 0)
         to_dt = datetime(2026, 5, 7, 17, 0, 0)
-        fetch_emails("imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-                     from_dt=from_dt, to_dt=to_dt)
+        fetch_emails(
+            "imap.test", 993, "u@uni.edu", "pwd", "Inbox", from_dt=from_dt, to_dt=to_dt
+        )
 
         search_arg = conn.search.call_args[0][1]
         assert "SINCE" in search_arg
@@ -249,7 +287,6 @@ class TestFetchEmails:
 
     @patch("maildigest.fetcher.imaplib.IMAP4_SSL")
     def test_internaldate_filters_out_messages_outside_window(self, mock_ssl_class):
-        from datetime import timezone
         raw = _plain_bytes("Old", "sender@uni.edu", "old body")
         conn = MagicMock()
         mock_ssl_class.return_value = conn
@@ -262,11 +299,14 @@ class TestFetchEmails:
         to_dt = datetime(2026, 5, 6, 23, 59, 59)
         # "05-May-2026 00:00:00 +0000" is at most 14h ahead of from_dt local time,
         # always outside [17:00, 23:59] local on May 6.
-        internaldate_header = b'1 (INTERNALDATE "05-May-2026 00:00:00 +0000" RFC822 {10})'
+        internaldate_header = (
+            b'1 (INTERNALDATE "05-May-2026 00:00:00 +0000" RFC822 {10})'
+        )
         conn.fetch.return_value = (None, [(internaldate_header, raw)])
 
-        result = fetch_emails("imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-                              from_dt=from_dt, to_dt=to_dt)
+        result = fetch_emails(
+            "imap.test", 993, "u@uni.edu", "pwd", "Inbox", from_dt=from_dt, to_dt=to_dt
+        )
 
         assert result == []
 
@@ -284,8 +324,13 @@ class TestFetchEmails:
         ]
 
         result = fetch_emails(
-            "imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-            from_dt=_FROM_DT, to_dt=_TO_DT,
+            "imap.test",
+            993,
+            "u@uni.edu",
+            "pwd",
+            "Inbox",
+            from_dt=_FROM_DT,
+            to_dt=_TO_DT,
             sender_filter=["@uoc.gr"],
         )
 
@@ -306,7 +351,12 @@ class TestFetchEmails:
         ]
 
         result = fetch_emails(
-            "imap.test", 993, "u@uni.edu", "pwd", "Inbox",
-            from_dt=_FROM_DT, to_dt=_TO_DT,
+            "imap.test",
+            993,
+            "u@uni.edu",
+            "pwd",
+            "Inbox",
+            from_dt=_FROM_DT,
+            to_dt=_TO_DT,
         )
         assert len(result) == 2

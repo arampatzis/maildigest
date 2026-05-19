@@ -11,38 +11,38 @@ mailboxes:
   # ─────────────────────────────────────────────────────────────────────────
   # Example 1: University newsletters — Monday-to-Friday, summarised in Greek
   # ─────────────────────────────────────────────────────────────────────────
-  - name: uoc_newsletters          # machine name — used in keychain and filenames
+-   name: uoc_newsletters          # machine name — used in keychain and filenames
     label: "UOC Newsletters"       # display name shown in logs and email subjects
 
     enabled: true                  # set to false to temporarily skip this mailbox
 
     imap:
-      server: imap.uoc.gr
-      port: 993
-      email: user@uoc.gr
-      folder: UOC-filtered.News    # required — IMAP folder to read from
+        server: imap.uoc.gr
+        port: 993
+        email: user@uoc.gr
+        folder: UOC-filtered.News  # required — IMAP folder to read from
 
     smtp:
-      server: smtp.uoc.gr
-      port: 587
+        server: smtp.uoc.gr
+        port: 587
       # The digest is sent from/to imap.email (send-to-self).
       # Passwords are stored in the keychain — never here.
 
     schedule:
-      days: [mon, tue, wed, thu, fri]   # required — "daily" or list of: mon tue wed thu fri sat sun
-      times: ["09:00", "17:00"]         # required — one or more HH:MM times in 24-hour format
+        days: [mon, tue, wed, thu, fri] # required — "daily" or list of: mon tue wed thu fri sat sun
+        times: ["09:00", "17:00"]       # required — one or more HH:MM times in 24-hour format
 
     summarizer:
-      language: Greek              # language for the Claude summary output
+        language: Greek            # language for the Claude summary output
 
       # Bullet points appended to the prompt — Claude will pay extra attention.
-      focus_areas:
-        - grant calls and funding deadlines
-        - events and seminars
-        - administrative announcements
+        focus_areas:
+        -   grant calls and funding deadlines
+        -   events and seminars
+        -   administrative announcements
 
       # Optional free-form instruction added to the prompt.
-      extra_instructions: "Ignore social event promotions and advertisements."
+        extra_instructions: "Ignore social event promotions and advertisements."
 
       # Optional: replace the entire built-in prompt with your own.
       # When set, language / focus_areas / extra_instructions are ignored.
@@ -61,27 +61,27 @@ mailboxes:
   # ─────────────────────────────────────────────────────────────────────────
   # Example 2: Personal subscriptions — weekly on Monday, in English
   # ─────────────────────────────────────────────────────────────────────────
-  - name: personal_newsletters
+-   name: personal_newsletters
     label: "Personal Newsletters"
 
     enabled: false                 # disabled by default — enable when ready
 
     imap:
-      server: imap.gmail.com
-      port: 993
-      email: you@gmail.com
-      folder: Newsletters          # required
+        server: imap.gmail.com
+        port: 993
+        email: you@gmail.com
+        folder: Newsletters        # required
 
     smtp:
-      server: smtp.gmail.com
-      port: 587
+        server: smtp.gmail.com
+        port: 587
 
     schedule:
-      days: [mon]                  # required — weekly digest every Monday
-      times: ["09:00"]             # required
+        days: [mon]                # required — weekly digest every Monday
+        times: ["09:00"]           # required
 
     summarizer:
-      language: English
-      focus_areas:
-        - product updates and new features
-        - industry news
+        language: English
+        focus_areas:
+        -   product updates and new features
+        -   industry news

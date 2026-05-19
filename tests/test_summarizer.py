@@ -4,35 +4,33 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from maildigest.config import MailboxConfig
 from maildigest.summarizer import _build_prompt, summarize_with_claude
 
 
 def _make_mailbox(**overrides) -> MailboxConfig:
-    defaults = dict(
-        name="test_mb",
-        label="Test Mailbox",
-        enabled=True,
-        imap_server="imap.test",
-        imap_port=993,
-        email="u@test.edu",
-        imap_folder="Newsletters",
-        smtp_server="smtp.test",
-        smtp_port=587,
-        schedule_days=frozenset({"daily"}),
-        schedule_times=[(9, 0)],
-        language="English",
-        focus_areas=[],
-        extra_instructions="",
-        custom_prompt=None,
-        body_char_limit=3000,
-        sender_filter=[],
-        summary_dir=Path("/tmp/summaries"),
-        imap_password="imap_pwd",
-        smtp_password="smtp_pwd",
-    )
+    defaults = {
+        "name": "test_mb",
+        "label": "Test Mailbox",
+        "enabled": True,
+        "imap_server": "imap.test",
+        "imap_port": 993,
+        "email": "u@test.edu",
+        "imap_folder": "Newsletters",
+        "smtp_server": "smtp.test",
+        "smtp_port": 587,
+        "schedule_days": frozenset({"daily"}),
+        "schedule_times": [(9, 0)],
+        "language": "English",
+        "focus_areas": [],
+        "extra_instructions": "",
+        "custom_prompt": None,
+        "body_char_limit": 3000,
+        "sender_filter": [],
+        "summary_dir": Path("/tmp/summaries"),
+        "imap_password": "imap_pwd",
+        "smtp_password": "smtp_pwd",
+    }
     defaults.update(overrides)
     return MailboxConfig(**defaults)
 

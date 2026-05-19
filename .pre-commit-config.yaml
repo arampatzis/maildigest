@@ -1,0 +1,63 @@
+repos:
+
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-toml
+    -   id: check-added-large-files
+    -   id: check-case-conflict
+    -   id: check-executables-have-shebangs
+    -   id: check-shebang-scripts-are-executable
+    -   id: check-merge-conflict
+
+-   repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.14.0
+    hooks:
+    -   id: pretty-format-yaml
+        args: [--autofix, --indent, '4', --preserve-quotes]
+    -   id: pretty-format-toml
+        args: [--autofix]
+
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.1
+    hooks:
+    -   id: ruff-format
+        args: [--config=pyproject.toml]
+    -   id: ruff-check
+        args: [--config=pyproject.toml, --fix, --unsafe-fixes, --output-format=concise, --quiet]
+
+-   repo: https://github.com/asottile/pyupgrade
+    rev: v3.20.0
+    hooks:
+    -   id: pyupgrade
+        args: [--py310-plus]
+
+-   repo: https://github.com/dannysepler/rm_unneeded_f_str
+    rev: v0.2.0
+    hooks:
+    -   id: rm-unneeded-f-str
+
+-   repo: local
+    hooks:
+    -   id: mypy
+        name: Run mypy
+        entry: mypy
+        args: [--show-error-codes, --explicit-package-bases, --config-file=pyproject.toml]
+        language: system
+        types: [python]
+        require_serial: true
+        exclude: ^tests/
+
+-   repo: local
+    hooks:
+    -   id: pytest
+        name: Run pytest
+        entry: python -m pytest
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
+        always_run: true

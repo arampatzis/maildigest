@@ -62,7 +62,10 @@ def fetch_emails(
     """
     log.debug(
         "Fetching emails from %s folder '%s': %s → %s",
-        imap_server, mail_folder, from_dt, to_dt,
+        imap_server,
+        mail_folder,
+        from_dt,
+        to_dt,
     )
     log.debug("Connecting to %s:%d as %s", imap_server, imap_port, email_address)
     conn = imaplib.IMAP4_SSL(imap_server, imap_port)
@@ -87,18 +90,20 @@ def fetch_emails(
         for i, msg_id in enumerate(ids, 1):
             log.debug("Fetching message %d of %d (id=%s)", i, len(ids), msg_id)
             _, msg_data = conn.fetch(msg_id, "(INTERNALDATE RFC822)")
-            header_bytes = msg_data[0][0]
-            raw = msg_data[0][1]
+            header_bytes = msg_data[0][0]  # type: ignore[index]
+            raw = msg_data[0][1]  # type: ignore[index]
 
-            received = _parse_internaldate(header_bytes)
+            received = _parse_internaldate(header_bytes)  # type: ignore[arg-type]
             if received is not None and not (from_dt <= received <= to_dt):
                 log.debug(
                     "  Skipping — INTERNALDATE %s outside [%s, %s].",
-                    received, from_dt, to_dt,
+                    received,
+                    from_dt,
+                    to_dt,
                 )
                 continue
 
-            msg = email.message_from_bytes(raw)
+            msg = email.message_from_bytes(raw)  # type: ignore[arg-type]
             from_val = _decode_header_value(msg.get("From", "Unknown"))
 
             if sender_filter and not _matches_filter(from_val, sender_filter):
@@ -107,18 +112,20 @@ def fetch_emails(
 
             subject = _decode_header_value(msg.get("Subject", "(No subject)"))
             log.debug("  Subject: %s", subject)
-            emails.append({
-                "subject": subject,
-                "from": from_val,
-                "body": _extract_plain_text(msg)[:body_char_limit],
-            })
+            emails.append(
+                {
+                    "subject": subject,
+                    "from": from_val,
+                    "body": _extract_plain_text(msg)[:body_char_limit],
+                }
+            )
     finally:
         conn.logout()
     return emails
 
 
 def _parse_internaldate(data: bytes | None) -> datetime | None:
-    """Parse INTERNALDATE from an IMAP fetch response header; returns local naive datetime."""
+    """Parse INTERNALDATE from an IMAP fetch header; return local naive datetime."""
     if data is None:
         return None
     match = re.search(rb'INTERNALDATE "([^"]+)"', data, re.IGNORECASE)
@@ -159,6 +166,6 @@ def _decode_payload(part: email.message.Message) -> str:
         return ""
     charset = part.get_content_charset() or "utf-8"
     try:
-        return payload.decode(charset, errors="replace")
+        return payload.decode(charset, errors="replace")  # type: ignore[union-attr]
     except LookupError:
-        return payload.decode("utf-8", errors="replace")
+        return payload.decode("utf-8", errors="replace")  # type: ignore[union-attr]

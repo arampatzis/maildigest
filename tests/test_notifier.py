@@ -84,10 +84,13 @@ class TestSendEmailSummaryLabel:
     def test_label_in_subject(self, mock_smtp_class):
         import email as email_lib
         from email.header import decode_header, make_header
+
         mock_server = MagicMock()
         mock_smtp_class.return_value.__enter__.return_value = mock_server
 
-        send_email_summary(_SUMMARY, "smtp.test", 587, "me@test.com", "secret", "UOC Faculty")
+        send_email_summary(
+            _SUMMARY, "smtp.test", 587, "me@test.com", "secret", "UOC Faculty"
+        )
 
         raw = mock_server.sendmail.call_args[0][2]
         parsed = email_lib.message_from_string(raw)
@@ -100,13 +103,20 @@ class TestSendEmailSummaryTargetDate:
     def test_target_date_in_subject(self, mock_smtp_class):
         import email as email_lib
         from email.header import decode_header, make_header
+
         mock_server = MagicMock()
         mock_smtp_class.return_value.__enter__.return_value = mock_server
         from datetime import datetime
+
         target = datetime(2026, 5, 6, 9, 0)
 
         send_email_summary(
-            _SUMMARY, "smtp.test", 587, "me@test.com", "secret", _LABEL,
+            _SUMMARY,
+            "smtp.test",
+            587,
+            "me@test.com",
+            "secret",
+            _LABEL,
             target_dt=target,
         )
 
@@ -123,5 +133,7 @@ class TestSendEmailSummaryCharset:
         mock_server = MagicMock()
         mock_smtp_class.return_value.__enter__.return_value = mock_server
         greek_summary = "Ανακοινώσεις:\n- Εκδήλωση Παρασκευή"
-        send_email_summary(greek_summary, "smtp.test", 587, "me@test.com", "secret", _LABEL)
+        send_email_summary(
+            greek_summary, "smtp.test", 587, "me@test.com", "secret", _LABEL
+        )
         mock_server.sendmail.assert_called_once()

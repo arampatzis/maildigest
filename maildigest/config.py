@@ -45,11 +45,14 @@ def _init_keyring() -> None:
     """
     global _keyring
     from keyrings.cryptfile.cryptfile import CryptFileKeyring
+
     kr = CryptFileKeyring()
     password = os.environ.pop("KEYRING_CRYPTFILE_PASSWORD", None)
     if not password:
         # Check for password written by `service start` to the user's tmpfs runtime dir.
-        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+        runtime_dir = Path(
+            os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        )
         passwd_file = runtime_dir / "maildigest.passwd"
         if passwd_file.exists():
             try:
@@ -76,25 +79,26 @@ def _init_keyring() -> None:
 # Runtime data model (dataclasses — holds resolved secrets too)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MailboxConfig:
-    name: str               # machine name — keychain key prefix, last_run filename
-    label: str              # human-readable display name
+    name: str  # machine name — keychain key prefix, last_run filename
+    label: str  # human-readable display name
     enabled: bool
     imap_server: str
     imap_port: int
-    email: str              # IMAP login + SMTP From/To (send-to-self)
+    email: str  # IMAP login + SMTP From/To (send-to-self)
     imap_folder: str
     smtp_server: str
     smtp_port: int
-    schedule_days: frozenset    # {"daily"} or {"mon", "tue", …}
-    schedule_times: list        # [(hour, minute), …]
+    schedule_days: frozenset  # {"daily"} or {"mon", "tue", …}
+    schedule_times: list  # [(hour, minute), …]
     language: str
     focus_areas: list
     extra_instructions: str
     custom_prompt: str | None
     body_char_limit: int
-    sender_filter: list         # only fetch from these senders (empty = no filter)
+    sender_filter: list  # only fetch from these senders (empty = no filter)
     summary_dir: Path
     imap_password: str = field(repr=False)
     smtp_password: str = field(repr=False)
@@ -110,12 +114,13 @@ class AppConfig:
 # YAML schema (pydantic — validates raw config before any logic runs)
 # ---------------------------------------------------------------------------
 
+
 class _ImapSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
     server: str
     port: int = 993
     email: str
-    folder: str                     # required — no default
+    folder: str  # required — no default
 
 
 class _SmtpSchema(BaseModel):
@@ -126,19 +131,19 @@ class _SmtpSchema(BaseModel):
 
 class _ScheduleSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    days: str | list[str]           # required — no default
-    times: list[str]                # required — no default
+    days: str | list[str]  # required — no default
+    times: list[str]  # required — no default
 
     @field_validator("days")
     @classmethod
-    def _check_days(cls, v):
-        _parse_schedule_days(v)     # raises ValueError on bad input
+    def _check_days(cls, v: str | list[str]) -> str | list[str]:
+        _parse_schedule_days(v)  # raises ValueError on bad input
         return v
 
     @field_validator("times")
     @classmethod
-    def _check_times(cls, v):
-        _parse_schedule_times(v)    # raises ValueError on bad input
+    def _check_times(cls, v: list[str]) -> list[str]:
+        _parse_schedule_times(v)  # raises ValueError on bad input
         return v
 
 
@@ -174,6 +179,7 @@ class _AppSchema(BaseModel):
 # Config file helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_config_file() -> Path:
     if custom := os.environ.get("MAILDIGEST_CONFIG"):
         path = Path(custom).expanduser()
@@ -193,7 +199,7 @@ def _find_config_file() -> Path:
     return _USER_CONFIG_FILE
 
 
-def _parse_schedule_days(raw) -> frozenset:
+def _parse_schedule_days(raw: str | list[str]) -> frozenset[str]:
     if isinstance(raw, str):
         val = raw.strip().lower()
         days = {"daily"} if val == "daily" else {val}
@@ -212,7 +218,7 @@ def _parse_schedule_days(raw) -> frozenset:
     return frozenset(days)
 
 
-def _parse_schedule_times(raw) -> list[tuple[int, int]]:
+def _parse_schedule_times(raw: str | list[str] | None) -> list[tuple[int, int]]:
     if raw is None:
         return [(9, 0)]
     if isinstance(raw, str):
@@ -227,7 +233,7 @@ def _parse_schedule_times(raw) -> list[tuple[int, int]]:
         except (ValueError, AttributeError):
             raise ValueError(
                 f"Invalid schedule time '{item}'. Expected HH:MM (e.g. '09:00')."
-            )
+            ) from None
         result.append((hour, minute))
     if not result:
         raise ValueError("schedule.times cannot be empty.")
@@ -238,6 +244,7 @@ def _parse_schedule_times(raw) -> list[tuple[int, int]]:
 # Main config loader
 # ---------------------------------------------------------------------------
 
+
 def load_config(config_path: str | None = None) -> AppConfig:
     path = Path(config_path).expanduser() if config_path else _find_config_file()
     if not path.exists():
@@ -245,9 +252,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
             f"Config file not found at {path}. "
             "Copy config.yaml.example there and fill in your settings."
         )
-    config_path = path
 
-    with config_path.open() as f:
+    with path.open() as f:
         raw = yaml.safe_load(f)
 
     try:
@@ -274,28 +280,30 @@ def load_config(config_path: str | None = None) -> AppConfig:
             else global_summary_dir / mb.name
         )
 
-        mailboxes.append(MailboxConfig(
-            name=mb.name,
-            label=mb.label or mb.name,
-            enabled=mb.enabled,
-            imap_server=mb.imap.server,
-            imap_port=mb.imap.port,
-            email=email,
-            imap_folder=mb.imap.folder,
-            smtp_server=mb.smtp.server,
-            smtp_port=mb.smtp.port,
-            schedule_days=_parse_schedule_days(mb.schedule.days),
-            schedule_times=_parse_schedule_times(mb.schedule.times),
-            language=mb.summarizer.language,
-            focus_areas=list(mb.summarizer.focus_areas),
-            extra_instructions=mb.summarizer.extra_instructions,
-            custom_prompt=mb.summarizer.custom_prompt,
-            body_char_limit=mb.body_char_limit,
-            sender_filter=list(mb.sender_filter),
-            summary_dir=summary_dir,
-            imap_password=imap_password,
-            smtp_password=smtp_password,
-        ))
+        mailboxes.append(
+            MailboxConfig(
+                name=mb.name,
+                label=mb.label or mb.name,
+                enabled=mb.enabled,
+                imap_server=mb.imap.server,
+                imap_port=mb.imap.port,
+                email=email,
+                imap_folder=mb.imap.folder,
+                smtp_server=mb.smtp.server,
+                smtp_port=mb.smtp.port,
+                schedule_days=_parse_schedule_days(mb.schedule.days),
+                schedule_times=_parse_schedule_times(mb.schedule.times),
+                language=mb.summarizer.language,
+                focus_areas=list(mb.summarizer.focus_areas),
+                extra_instructions=mb.summarizer.extra_instructions,
+                custom_prompt=mb.summarizer.custom_prompt,
+                body_char_limit=mb.body_char_limit,
+                sender_filter=list(mb.sender_filter),
+                summary_dir=summary_dir,
+                imap_password=imap_password,
+                smtp_password=smtp_password,
+            )
+        )
 
     return AppConfig(anthropic_api_key=anthropic_key, mailboxes=mailboxes)
 
@@ -303,6 +311,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
 # ---------------------------------------------------------------------------
 # Secrets
 # ---------------------------------------------------------------------------
+
 
 def _get_secret(env_key: str, keyring_name: str) -> str:
     if _keyring is not None:

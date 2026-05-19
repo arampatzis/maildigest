@@ -1,5 +1,12 @@
 # 📬 maildigest
 
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![Tests](https://github.com/arampatzis/maildigest/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/arampatzis/maildigest/actions/workflows/test.yml)
+[![Ruff](https://github.com/arampatzis/maildigest/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/arampatzis/maildigest/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/arampatzis/maildigest/branch/main/graph/badge.svg)](https://codecov.io/gh/arampatzis/maildigest)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+
 Multi-mailbox newsletter summariser powered by Claude AI.
 
 Fetches emails from one or more configured IMAP folders, summarises them with
@@ -12,7 +19,7 @@ a long-lived daemon managed by systemd.
 ## ✅ Requirements
 
 - Ubuntu Server (22.04+)
-- Python 3.11+
+- Python 3.10+
 - An [Anthropic API key](https://console.anthropic.com/settings/keys)
 
 ---
@@ -305,4 +312,3 @@ disk, so a rebooted machine without intervention cannot decrypt your secrets.
 ```bash
 poetry run pytest
 ```
-

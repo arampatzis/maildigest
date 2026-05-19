@@ -57,7 +57,7 @@ def summarize_with_claude(
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
-    result = message.content[0].text
+    result = message.content[0].text  # type: ignore[union-attr]
     log.debug("Claude responded with %d characters.", len(result))
     return result
 
@@ -96,7 +96,8 @@ def _build_prompt(
     extra = (
         f"\nIMPORTANT: {mailbox.extra_instructions} "
         f"Do not mention excluded emails anywhere — not even to note their existence.\n"
-        if mailbox.extra_instructions else ""
+        if mailbox.extra_instructions
+        else ""
     )
 
     return (
@@ -115,12 +116,13 @@ def _build_prompt(
         f"## Overview\n"
         f"2-3 sentence summary of the day's newsletters.\n\n"
         f"## Announcements & Events\n"
-        f"One bullet item per announcement or event, including date/time when given.\n\n"
+        f"One bullet per announcement or event, including date/time when given.\n\n"
         f"## Action Items\n"
         f"One bullet item per action the reader should take, with any deadlines.\n\n"
         f"Keep the tone professional and concise.\n"
         f"{extra}\n"
-        f"Below are {len(emails)} {'newsletter' if len(emails) == 1 else 'newsletters'} "
+        f"Below are {len(emails)} "
+        f"{'newsletter' if len(emails) == 1 else 'newsletters'} "
         f"received on {date_fmt}:\n\n"
         f"{body}"
     )

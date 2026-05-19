@@ -1,15 +1,15 @@
 """Command-line entry points for maildigest."""
 
+import imaplib
 import logging
 import os
 import shutil
+import smtplib
 import subprocess
 import sys
-from datetime import date, datetime, time as dt_time
+from datetime import date, datetime
+from datetime import time as dt_time
 from pathlib import Path
-
-import imaplib
-import smtplib
 
 import click
 import yaml
@@ -19,7 +19,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 
 from maildigest.config import (
-    USER_CONFIG_DIR,
+    MailboxConfig,
     _find_config_file,
     _init_keyring,
     _try_get_secret,
@@ -42,6 +42,7 @@ _console = Console(highlight=False)
 
 
 def setup_logging(debug: bool) -> None:
+    handler: logging.Handler
     if sys.stderr.isatty():
         handler = RichHandler(
             show_path=debug,
@@ -82,7 +83,7 @@ WantedBy=default.target
 
 
 def _run_mailbox_digest(
-    mb,
+    mb: MailboxConfig,
     api_key: str,
     from_dt: datetime | None = None,
     to_dt: datetime | None = None,
@@ -179,27 +180,36 @@ def main(ctx: click.Context, debug: bool) -> None:
 
 @main.command()
 @click.option(
-    "--from", "from_arg",
+    "--from",
+    "from_arg",
     type=click.DateTime(formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M"]),
     default=None,
     help="Start datetime (YYYY-MM-DD or YYYY-MM-DDTHH:MM). Defaults to last run time.",
 )
 @click.option(
-    "--to", "to_arg",
+    "--to",
+    "to_arg",
     type=click.DateTime(formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M"]),
     default=None,
     help="End datetime (YYYY-MM-DD or YYYY-MM-DDTHH:MM). Defaults to now.",
 )
 @click.option(
-    "--force", is_flag=True, default=False,
+    "--force",
+    is_flag=True,
+    default=False,
     help="Re-run from start of today even if already up to date.",
 )
 @click.option(
-    "--dry-run", "dry_run", is_flag=True, default=False,
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
     help="Fetch and summarise but skip saving and emailing.",
 )
 @click.option(
-    "--mailbox", "mailbox_filter", default=None,
+    "--mailbox",
+    "mailbox_filter",
+    default=None,
     help="Process only this mailbox (by name).",
 )
 def run(
@@ -213,12 +223,12 @@ def run(
     try:
         _init_keyring()
     except RuntimeError as exc:
-        log.error("Fatal: %s", exc)
+        log.exception("Fatal: %s", exc)
         sys.exit(1)
     try:
         cfg = load_config()
     except Exception as exc:
-        log.error("Fatal: %s", exc)
+        log.exception("Fatal: %s", exc)
         log.debug("Traceback:", exc_info=True)
         sys.exit(1)
 
@@ -235,10 +245,16 @@ def run(
 
     explicit_mode = from_arg is not None or to_arg is not None
     if explicit_mode:
-        fixed_to: datetime = to_arg if to_arg is not None else datetime.combine(today, dt_time(23, 59, 59))
+        fixed_to: datetime = (
+            to_arg
+            if to_arg is not None
+            else datetime.combine(today, dt_time(23, 59, 59))
+        )
         if to_arg is not None and to_arg.time() == dt_time.min:
             fixed_to = to_arg.replace(hour=23, minute=59, second=59)
-        fixed_from: datetime = from_arg if from_arg is not None else datetime.combine(today, dt_time.min)
+        fixed_from: datetime = (
+            from_arg if from_arg is not None else datetime.combine(today, dt_time.min)
+        )
         if fixed_from > fixed_to:
             raise click.BadParameter(f"--from {fixed_from} is after --to {fixed_to}.")
 
@@ -249,12 +265,20 @@ def run(
     for mb in mailboxes:
         try:
             if explicit_mode:
-                _run_mailbox_digest(mb, cfg.anthropic_api_key, fixed_from, fixed_to, dry_run, update_last_run=False)
+                _run_mailbox_digest(
+                    mb,
+                    cfg.anthropic_api_key,
+                    fixed_from,
+                    fixed_to,
+                    dry_run,
+                    update_last_run=False,
+                )
             else:
                 if not is_scheduled_today(mb) and not force:
                     log.info(
                         "[%s] Not scheduled for today (%s). Skipping.",
-                        mb.label, today.strftime("%a"),
+                        mb.label,
+                        today.strftime("%a"),
                     )
                     continue
                 to_dt = datetime.now()
@@ -265,7 +289,7 @@ def run(
                     from_dt = last_run_dt
                 _run_mailbox_digest(mb, cfg.anthropic_api_key, from_dt, to_dt, dry_run)
         except Exception as exc:
-            log.error("[%s] Failed: %s", mb.label, exc)
+            log.exception("[%s] Failed: %s", mb.label, exc)
             log.debug("Traceback:", exc_info=True)
             failed.append(mb.label)
 
@@ -294,7 +318,9 @@ def list_mailboxes() -> None:
         smtp = mb["smtp"]
         sched = mb.get("schedule", {})
         days_raw = sched.get("days", "daily")
-        days_str = "daily" if days_raw == "daily" else " ".join(str(d) for d in days_raw)
+        days_str = (
+            "daily" if days_raw == "daily" else " ".join(str(d) for d in days_raw)
+        )
         times_raw = sched.get("times", [])
         times_str = "  ".join(
             str(t) for t in (times_raw if isinstance(times_raw, list) else [times_raw])
@@ -315,8 +341,8 @@ def list_mailboxes() -> None:
         _console.print(header)
 
         key = "[italic]{:<9}[/italic]".format
-        imap_port = imap.get('port', 993)
-        smtp_port = smtp.get('port', 587)
+        imap_port = imap.get("port", 993)
+        smtp_port = smtp.get("port", 587)
         _console.print(
             f"    {key('IMAP:')} "
             f"{escape(imap['server'])}:[blue]{imap_port}[/blue]  "
@@ -324,14 +350,17 @@ def list_mailboxes() -> None:
             f"[italic]folder:[/italic] {escape(imap.get('folder', ''))}"
         )
         _console.print(
-            f"    {key('SMTP:')} "
-            f"{escape(smtp['server'])}:[blue]{smtp_port}[/blue]"
+            f"    {key('SMTP:')} {escape(smtp['server'])}:[blue]{smtp_port}[/blue]"
         )
         schedule_fmt = f"[yellow]{escape(days_str)}[/yellow]"
         if times_str:
             schedule_fmt += f"  [cyan]{escape(times_str)}[/cyan]"
         _console.print(f"    {key('Schedule:')} {schedule_fmt}")
-        last_fmt = f"[italic]{escape(last_str)}[/italic]" if last_str == "never" else f"[green]{escape(last_str)}[/green]"
+        last_fmt = (
+            f"[italic]{escape(last_str)}[/italic]"
+            if last_str == "never"
+            else f"[green]{escape(last_str)}[/green]"
+        )
         _console.print(f"    {key('Last run:')} {last_fmt}")
         _console.print()
 
@@ -359,7 +388,7 @@ def config_setup() -> None:
     try:
         _init_keyring()
     except RuntimeError as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc)) from exc
 
     with cfg_path.open() as f:
         raw = yaml.safe_load(f) or {}
@@ -373,7 +402,8 @@ def config_setup() -> None:
     if has_anthropic:
         _console.print("  [italic]already stored — press Enter to keep[/italic]")
     api_key = click.prompt(
-        "  Anthropic API key", hide_input=True,
+        "  Anthropic API key",
+        hide_input=True,
         default="" if has_anthropic else None,
         show_default=False,
     )
@@ -396,28 +426,37 @@ def config_setup() -> None:
 
         if email.endswith("@gmail.com"):
             _console.print(
-                "  [yellow]Gmail requires an app password (not your account password).[/yellow]\n"
+                "  [yellow]Gmail requires an app password"
+                " (not your account password).[/yellow]\n"
                 "  1. Go to: [link]https://myaccount.google.com/apppasswords[/link]\n"
-                "  2. Create a new app password (name it e.g. [italic]maildigest[/italic])\n"
+                "  2. Create a new app password"
+                " (name it e.g. [italic]maildigest[/italic])\n"
                 "  3. Enter the 16-character password below.",
                 highlight=False,
             )
 
         has_imap = bool(_try_get_secret(f"imap:{email}"))
         if has_imap:
-            _console.print("  [italic]IMAP: already stored — press Enter to keep[/italic]")
+            _console.print(
+                "  [italic]IMAP: already stored — press Enter to keep[/italic]"
+            )
         imap_pwd = click.prompt(
-            "  IMAP password (or app password)", hide_input=True,
+            "  IMAP password (or app password)",
+            hide_input=True,
             default="" if has_imap else None,
             show_default=False,
         )
 
         has_smtp = bool(_try_get_secret(f"smtp:{email}"))
         if has_smtp:
-            _console.print("  [italic]SMTP: already stored — press Enter to keep[/italic]")
+            _console.print(
+                "  [italic]SMTP: already stored — press Enter to keep[/italic]"
+            )
         smtp_pwd = click.prompt(
             "  SMTP password (leave blank to reuse IMAP password)",
-            hide_input=True, default="", show_default=False,
+            hide_input=True,
+            default="",
+            show_default=False,
         )
 
         if imap_pwd or smtp_pwd:
@@ -429,6 +468,7 @@ def config_setup() -> None:
 def _check_anthropic_key(api_key: str) -> str | None:
     """Returns None on success, error string on failure."""
     import anthropic
+
     try:
         anthropic.Anthropic(api_key=api_key).models.list()
         return None
@@ -482,11 +522,11 @@ def config_check() -> None:
     try:
         _init_keyring()
     except RuntimeError as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc)) from exc
     try:
         cfg = load_config()
     except Exception as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc)) from exc
 
     mailboxes = [mb for mb in cfg.mailboxes if mb.enabled]
     if not mailboxes:
@@ -513,7 +553,9 @@ def config_check() -> None:
         if key in seen_imap:
             continue
         seen_imap.add(key)
-        err = _check_imap_login(mb.imap_server, mb.imap_port, mb.email, mb.imap_password)
+        err = _check_imap_login(
+            mb.imap_server, mb.imap_port, mb.email, mb.imap_password
+        )
         if err:
             _console.print(
                 f"  {mb.imap_server}:{mb.imap_port}  {escape(mb.email)}  "
@@ -522,7 +564,8 @@ def config_check() -> None:
             all_ok = False
         else:
             _console.print(
-                f"  {mb.imap_server}:{mb.imap_port}  {escape(mb.email)}  [green]OK[/green]"
+                f"  {mb.imap_server}:{mb.imap_port}  {escape(mb.email)}"
+                "  [green]OK[/green]"
             )
             imap_ok.add(key)
 
@@ -543,7 +586,8 @@ def config_check() -> None:
             all_ok = False
         else:
             _console.print(
-                f"  {mb.smtp_server}:{mb.smtp_port}  {escape(mb.email)}  [green]OK[/green]"
+                f"  {mb.smtp_server}:{mb.smtp_port}  {escape(mb.email)}"
+                "  [green]OK[/green]"
             )
 
     # IMAP folders — one check per mailbox; skip if login failed for that account
@@ -583,6 +627,7 @@ def config_check() -> None:
 def daemon(cfg_path: str | None) -> None:
     """Run the long-lived scheduler daemon."""
     from maildigest.daemon import run_daemon
+
     run_daemon(cfg_path)
 
 
@@ -598,8 +643,10 @@ def service_install() -> None:
     unit_dir.mkdir(parents=True, exist_ok=True)
     # Use the direct venv script, not a pyenv shim that requires pyenv's environment.
     direct_bin = Path(sys.executable).parent / "maildigest"
-    digest_bin = str(direct_bin) if direct_bin.exists() else (
-        shutil.which("maildigest") or str(direct_bin)
+    digest_bin = (
+        str(direct_bin)
+        if direct_bin.exists()
+        else (shutil.which("maildigest") or str(direct_bin))
     )
     unit = unit_dir / "maildigest.service"
     unit.write_text(_build_unit(digest_bin))
@@ -608,7 +655,7 @@ def service_install() -> None:
         subprocess.run(["systemctl", "--user", "enable", "maildigest"], check=True)
         subprocess.run(["loginctl", "enable-linger", os.getenv("USER", "")], check=True)
     except subprocess.CalledProcessError as exc:
-        log.error("Command failed: %s", exc)
+        log.exception("Command failed: %s", exc)
         sys.exit(1)
     _console.print("\n[green]Service installed and enabled.[/green]")
     _console.print("  Start:  [bold]maildigest service start[/bold]")
@@ -627,7 +674,7 @@ def service_uninstall() -> None:
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     except subprocess.CalledProcessError as exc:
-        log.error("systemctl failed: %s", exc)
+        log.exception("systemctl failed: %s", exc)
         sys.exit(1)
     log.info("Service uninstalled.")
 
@@ -637,17 +684,23 @@ def service_start() -> None:
     """Start the daemon (prompts for keyring master password)."""
     state = subprocess.run(
         ["systemctl", "--user", "is-active", "maildigest"],
-        capture_output=True, text=True,
+        check=False,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     if state in ("active", "activating"):
         _console.print("[yellow]Service is already running.[/yellow]")
-        subprocess.run(["systemctl", "--user", "status", "maildigest", "--no-pager", "-l"])
+        subprocess.run(
+            ["systemctl", "--user", "status", "maildigest", "--no-pager", "-l"],
+            check=False,
+        )
         sys.stdout.write("\033[0m")
         sys.stdout.flush()
         return
 
     import getpass
     import stat
+
     password = getpass.getpass("Keyring master password: ")
 
     runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -660,9 +713,11 @@ def service_start() -> None:
         subprocess.run(["systemctl", "--user", "start", "maildigest"], check=True)
     except subprocess.CalledProcessError as exc:
         passwd_file.unlink(missing_ok=True)
-        log.error("systemctl failed: %s", exc)
+        log.exception("systemctl failed: %s", exc)
         sys.exit(1)
-    subprocess.run(["systemctl", "--user", "status", "maildigest", "--no-pager", "-l"])
+    subprocess.run(
+        ["systemctl", "--user", "status", "maildigest", "--no-pager", "-l"], check=False
+    )
     sys.stdout.write("\033[0m")
     sys.stdout.flush()
 
@@ -673,7 +728,7 @@ def service_stop() -> None:
     try:
         subprocess.run(["systemctl", "--user", "stop", "maildigest"], check=True)
     except subprocess.CalledProcessError as exc:
-        log.error("systemctl failed: %s", exc)
+        log.exception("systemctl failed: %s", exc)
         sys.exit(1)
     _console.print("[yellow]Service stopped.[/yellow]")
 
@@ -684,26 +739,28 @@ def service_reload() -> None:
     try:
         subprocess.run(["systemctl", "--user", "reload", "maildigest"], check=True)
     except subprocess.CalledProcessError as exc:
-        log.error("systemctl failed: %s", exc)
+        log.exception("systemctl failed: %s", exc)
         sys.exit(1)
 
 
 @service.command("status")
 def service_status() -> None:
     """Show current daemon status."""
-    subprocess.run(["systemctl", "--user", "status", "maildigest", "-l"])
+    subprocess.run(["systemctl", "--user", "status", "maildigest", "-l"], check=False)
     sys.stdout.write("\033[0m")
     sys.stdout.flush()
 
 
 @service.command("log")
 @click.option("--follow", "-f", is_flag=True, help="Follow log output.")
-@click.option("--lines", "-n", default=50, show_default=True, help="Number of lines to show.")
+@click.option(
+    "--lines", "-n", default=50, show_default=True, help="Number of lines to show."
+)
 def service_log(follow: bool, lines: int) -> None:
     """Show daemon logs."""
     cmd = ["journalctl", "--user", "-u", "maildigest", f"-n{lines}"]
     if follow:
         cmd.append("-f")
-    subprocess.run(cmd)
+    subprocess.run(cmd, check=False)
     sys.stdout.write("\033[0m")
     sys.stdout.flush()

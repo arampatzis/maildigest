@@ -1,47 +1,168 @@
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core"]
+
 [project]
-name = "maildigest"
-version = "0.2.0"
+authors = [{name = "Georgios Arampatzis", email = "georgios.arampatzis@uoc.gr"}]
+dependencies = [
+  "anthropic>=0.28.0",
+  "pyyaml>=6.0",
+  "keyring>=25.0",
+  "keyrings.cryptfile>=1.3",
+  "apscheduler>=3.10,<4.0",
+  "pydantic>=2.0",
+  "click>=8.0",
+  "markdown>=3.6",
+  "rich>=13.0",
+  "pretty-errors>=1.2.25,<2.0.0"
+]
 description = "Summarise university newsletters daily with Claude AI"
-authors = [{ name = "Georgios Arampatzis", email = "georgios.arampatzis@uoc.gr" }]
+name = "maildigest"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "anthropic>=0.28.0",
-    "pyyaml>=6.0",
-    "keyring>=25.0",
-    "keyrings.cryptfile>=1.3",
-    "apscheduler>=3.10,<4.0",
-    "pydantic>=2.0",
-    "click>=8.0",
-    "markdown>=3.6",
-    "rich (>=13.0)",
-    "pretty-errors (>=1.2.25,<2.0.0)",
-]
+version = "0.2.0"
 
 [project.scripts]
 maildigest = "maildigest.cli:main"
 
-[tool.poetry]
-packages = [{ include = "maildigest" }]
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-pytest-mock = "^3.14"
-pytest-cov = "^5.0"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.coverage.run]
-source = ["maildigest"]
+[tool.coverage.html]
+directory = "htmlcov"
 
 [tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:"
+]
+precision = 2
 show_missing = true
 skip_covered = false
-exclude_lines = [
-    "if __name__ == .__main__.:",
+
+[tool.coverage.run]
+branch = true
+omit = ["tests/*", "maildigest/cli.py"]
+source = ["maildigest"]
+
+[tool.mypy]
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+exclude = "^tests/"
+python_version = "3.10"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = [
+  "keyrings.cryptfile.*",
+  "apscheduler.*",
+  "pretty_errors.*"
 ]
+
+[tool.poetry]
+packages = [{include = "maildigest"}]
+
+[tool.poetry.group.dev.dependencies]
+mypy = "^1.0"
+pre-commit = "^4.0"
+pytest = "^8.0"
+pytest-cov = "^5.0"
+pytest-mock = "^3.14"
+types-Markdown = "^3.6"
+types-PyYAML = "^6.0"
+
+[tool.pytest.ini_options]
+addopts = [
+  "-v",
+  "--tb=short",
+  "--strict-markers",
+  "--disable-warnings",
+  "--color=yes",
+  "--cov=maildigest",
+  "--cov-report=term-missing",
+  "--cov-fail-under=90"
+]
+markers = [
+  "unit: Unit tests for individual components",
+  "integration: Integration tests for complete workflows",
+  "slow: Tests that take longer to run"
+]
+python_classes = ["Test*"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+testpaths = ["tests"]
+
+[tool.ruff]
+exclude = ["sandbox", "docs"]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+ignore = [
+  "PLR0913",
+  "PLR0915",
+  "PLR2004",
+  "RUF001",
+  "S101",
+  "S102",
+  "S602",
+  "S603",
+  "S604",
+  "ANN",
+  "COM819",
+  "COM812",
+  "NPY002",
+  "B027",
+  "PD901",
+  "PD011",
+  "PERF203",
+  "A002",
+  "A003",
+  "PTH",
+  "FBT",
+  "DTZ",
+  "EM",
+  "FA100",
+  "T201",
+  "TRY003",
+  "TRY300",
+  "ISC001",
+  "N806",
+  "N803",
+  "SLF001",
+  "S311",
+  # Complexity — CLI and network-check helpers are intentionally branchy
+  "C901",
+  "PLR0912",
+  # Docstrings — imperative mood and missing on internal helpers
+  "D103",
+  "D401",
+  "D205",
+  "D400",
+  # Blind exception — intentional in network-check helpers that stringify errors
+  "BLE001",
+  # Partial executable path — intentional with well-known system commands
+  "S607",
+  # Lazy imports — intentional (anthropic, getpass delayed until needed)
+  "PLC0415",
+  # TRY300/301/400/401 — raise/log patterns that are intentional here
+  "TRY301",
+  "TRY400",
+  "TRY401",
+  # PLW0603 — global keyring singleton is intentional
+  "PLW0603",
+  # D101 — dataclass docstrings are self-documenting
+  "D101"
+]
+select = ["ALL"]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "double"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "S105", "S108", "ARG002", "ARG005", "PT011"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"

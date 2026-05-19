@@ -23,34 +23,34 @@ from maildigest.config import (
     write_last_run,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mailbox(**overrides) -> MailboxConfig:
-    defaults = dict(
-        name="mb",
-        label="MB",
-        enabled=True,
-        imap_server="imap.test",
-        imap_port=993,
-        email="u@test.edu",
-        imap_folder="Newsletters",
-        smtp_server="smtp.test",
-        smtp_port=587,
-        schedule_days=frozenset({"daily"}),
-        schedule_times=[(9, 0)],
-        language="English",
-        focus_areas=[],
-        extra_instructions="",
-        custom_prompt=None,
-        body_char_limit=3000,
-        sender_filter=[],
-        summary_dir=Path("/tmp/s"),
-        imap_password="pw",
-        smtp_password="pw",
-    )
+    defaults = {
+        "name": "mb",
+        "label": "MB",
+        "enabled": True,
+        "imap_server": "imap.test",
+        "imap_port": 993,
+        "email": "u@test.edu",
+        "imap_folder": "Newsletters",
+        "smtp_server": "smtp.test",
+        "smtp_port": 587,
+        "schedule_days": frozenset({"daily"}),
+        "schedule_times": [(9, 0)],
+        "language": "English",
+        "focus_areas": [],
+        "extra_instructions": "",
+        "custom_prompt": None,
+        "body_char_limit": 3000,
+        "sender_filter": [],
+        "summary_dir": Path("/tmp/s"),
+        "imap_password": "pw",
+        "smtp_password": "pw",
+    }
     defaults.update(overrides)
     return MailboxConfig(**defaults)
 
@@ -84,6 +84,7 @@ _YAML = dedent("""\
 # _parse_schedule_days
 # ---------------------------------------------------------------------------
 
+
 class TestParseScheduleDays:
     def test_daily_string(self):
         result = _parse_schedule_days("daily")
@@ -103,7 +104,8 @@ class TestParseScheduleDays:
 
     def test_case_normalised(self):
         result = _parse_schedule_days(["MON", "TUE"])
-        assert "mon" in result and "tue" in result
+        assert "mon" in result
+        assert "tue" in result
 
     def test_empty_list_raises(self):
         with pytest.raises(ValueError, match="cannot be empty"):
@@ -113,6 +115,7 @@ class TestParseScheduleDays:
 # ---------------------------------------------------------------------------
 # _parse_schedule_times
 # ---------------------------------------------------------------------------
+
 
 class TestParseScheduleTimes:
     def test_none_defaults_to_nine_am(self):
@@ -151,6 +154,7 @@ class TestParseScheduleTimes:
 # is_scheduled_today
 # ---------------------------------------------------------------------------
 
+
 class TestIsScheduledToday:
     def test_daily_always_true(self):
         mb = _make_mailbox(schedule_days=frozenset({"daily"}))
@@ -172,6 +176,7 @@ class TestIsScheduledToday:
 # ---------------------------------------------------------------------------
 # read_last_run / write_last_run
 # ---------------------------------------------------------------------------
+
 
 class TestLastRun:
     def test_returns_none_when_file_absent(self, tmp_path, monkeypatch):
@@ -222,6 +227,7 @@ class TestLastRun:
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
+
 
 class TestLoadConfig:
     @patch("maildigest.config._try_get_secret", return_value=None)
@@ -293,12 +299,15 @@ class TestLoadConfig:
 # _find_config_file — lookup order
 # ---------------------------------------------------------------------------
 
+
 class TestFindConfigFile:
     def test_env_var_takes_highest_priority(self, tmp_path, monkeypatch):
         cfg = tmp_path / "custom.yaml"
         cfg.write_text("x: 1")
         monkeypatch.setenv("MAILDIGEST_CONFIG", str(cfg))
-        monkeypatch.setattr("maildigest.config._USER_CONFIG_FILE", tmp_path / "user.yaml")
+        monkeypatch.setattr(
+            "maildigest.config._USER_CONFIG_FILE", tmp_path / "user.yaml"
+        )
         assert _find_config_file() == cfg
 
     def test_local_config_takes_priority_over_user_config(self, tmp_path, monkeypatch):
@@ -333,6 +342,7 @@ class TestFindConfigFile:
 # _get_secret — environment variable fallback
 # ---------------------------------------------------------------------------
 
+
 class TestGetSecret:
     def test_falls_back_to_env_var_when_keyring_not_init(self, monkeypatch):
         monkeypatch.setattr("maildigest.config._keyring", None)
@@ -348,6 +358,7 @@ class TestGetSecret:
 
     def test_prefers_keyring_over_env(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         mock_kr.get_password.return_value = "kc_value"
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
@@ -360,10 +371,12 @@ class TestGetSecret:
 # Config schema validation
 # ---------------------------------------------------------------------------
 
+
 def _yaml_without(yaml_text: str, key: str) -> str:
     """Remove a line containing `key:` from a YAML string."""
     return "\n".join(
-        line for line in yaml_text.splitlines()
+        line
+        for line in yaml_text.splitlines()
         if not line.lstrip().startswith(f"{key}:")
     )
 
@@ -373,8 +386,10 @@ class TestConfigValidation:
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text(yaml_text)
         monkeypatch.setenv("MAILDIGEST_CONFIG", str(cfg_file))
-        with patch("maildigest.config._get_secret", return_value="any"), \
-             patch("maildigest.config._try_get_secret", return_value=None):
+        with (
+            patch("maildigest.config._get_secret", return_value="any"),
+            patch("maildigest.config._try_get_secret", return_value=None),
+        ):
             load_config()
 
     def test_missing_imap_folder_raises(self, tmp_path, monkeypatch):
@@ -417,10 +432,13 @@ class TestConfigValidation:
 # load_config — explicit path argument
 # ---------------------------------------------------------------------------
 
+
 class TestLoadConfigExplicitPath:
     @patch("maildigest.config._try_get_secret", return_value=None)
     @patch("maildigest.config._get_secret")
-    def test_explicit_path_overrides_env_var(self, mock_get, mock_try, tmp_path, monkeypatch):
+    def test_explicit_path_overrides_env_var(
+        self, mock_get, mock_try, tmp_path, monkeypatch
+    ):
         cfg_file = tmp_path / "explicit.yaml"
         cfg_file.write_text(_YAML)
         monkeypatch.setenv("MAILDIGEST_CONFIG", str(tmp_path / "should_not_use.yaml"))
@@ -431,7 +449,9 @@ class TestLoadConfigExplicitPath:
 
     @patch("maildigest.config._try_get_secret", return_value=None)
     @patch("maildigest.config._get_secret")
-    def test_nonexistent_explicit_path_raises(self, mock_get, mock_try, tmp_path, monkeypatch):
+    def test_nonexistent_explicit_path_raises(
+        self, mock_get, mock_try, tmp_path, monkeypatch
+    ):
         monkeypatch.delenv("MAILDIGEST_CONFIG", raising=False)
         with pytest.raises(FileNotFoundError):
             load_config(str(tmp_path / "nonexistent.yaml"))
@@ -441,6 +461,7 @@ class TestLoadConfigExplicitPath:
 # _try_get_secret
 # ---------------------------------------------------------------------------
 
+
 class TestTryGetSecret:
     def test_returns_none_when_keyring_not_init(self, monkeypatch):
         monkeypatch.setattr("maildigest.config._keyring", None)
@@ -448,6 +469,7 @@ class TestTryGetSecret:
 
     def test_returns_value_from_keyring(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         mock_kr.get_password.return_value = "stored_value"
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
@@ -455,6 +477,7 @@ class TestTryGetSecret:
 
     def test_returns_none_when_key_not_found(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         mock_kr.get_password.return_value = None
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
@@ -462,6 +485,7 @@ class TestTryGetSecret:
 
     def test_returns_none_on_keyring_exception(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         mock_kr.get_password.side_effect = Exception("keyring error")
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
@@ -472,6 +496,7 @@ class TestTryGetSecret:
 # store_credentials / store_anthropic_key
 # ---------------------------------------------------------------------------
 
+
 class TestStoreCredentials:
     def test_raises_when_keyring_not_init(self, monkeypatch):
         monkeypatch.setattr("maildigest.config._keyring", None)
@@ -480,6 +505,7 @@ class TestStoreCredentials:
 
     def test_stores_imap_password(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
         store_credentials("user@test.edu", "imap_pw")
@@ -489,15 +515,19 @@ class TestStoreCredentials:
 
     def test_stores_smtp_password_separately(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
         store_credentials("user@test.edu", "imap_pw", "smtp_pw")
-        calls = {call.args[1]: call.args[2] for call in mock_kr.set_password.call_args_list}
+        calls = {
+            call.args[1]: call.args[2] for call in mock_kr.set_password.call_args_list
+        }
         assert calls["imap:user@test.edu"] == "imap_pw"
         assert calls["smtp:user@test.edu"] == "smtp_pw"
 
     def test_skips_none_passwords(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
         store_credentials("user@test.edu", None, None)
@@ -512,6 +542,7 @@ class TestStoreAnthropicKey:
 
     def test_stores_under_correct_key(self, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_kr = MagicMock()
         monkeypatch.setattr("maildigest.config._keyring", mock_kr)
         store_anthropic_key("sk-ant-test")
