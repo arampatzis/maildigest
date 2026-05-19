@@ -171,6 +171,7 @@ def _run_mailbox_digest(
 
 @click.group()
 @click.option("--debug", is_flag=True, help="Enable debug logging.")
+@click.version_option(package_name="maildigest")
 @click.pass_context
 def main(ctx: click.Context, debug: bool) -> None:
     """Summarise your mailboxes with Claude AI."""
