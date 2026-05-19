@@ -42,7 +42,7 @@ jobs:
         -   name: Run tests with coverage
             env:
                 PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
-            run: poetry run pytest --cov-report=xml
+            run: poetry run pytest --cov-report=xml:coverage.xml
 
         -   name: Type check
             run: poetry run mypy maildigest

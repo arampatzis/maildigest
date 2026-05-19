@@ -2,9 +2,10 @@ name: Ruff
 
 on:
     push:
-        paths: ["**.py"]
+        branches: [main]
     pull_request:
-        paths: ["**.py"]
+        branches: [main]
+    workflow_dispatch:
 
 jobs:
     ruff:
