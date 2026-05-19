@@ -12,10 +12,14 @@ from maildigest.config import (
     _find_config_file,
     _get_secret,
     _parse_schedule_days,
+    _parse_schedule_times,
+    _try_get_secret,
     is_scheduled_today,
     last_run_path,
     load_config,
     read_last_run,
+    store_anthropic_key,
+    store_credentials,
     write_last_run,
 )
 
@@ -36,6 +40,7 @@ def _make_mailbox(**overrides) -> MailboxConfig:
         smtp_server="smtp.test",
         smtp_port=587,
         schedule_days=frozenset({"daily"}),
+        schedule_times=[(9, 0)],
         language="English",
         focus_areas=[],
         extra_instructions="",
@@ -66,6 +71,7 @@ _YAML = dedent("""\
           port: 587
         schedule:
           days: [mon, tue, wed, thu, fri]
+          times: ["09:00"]
         summarizer:
           language: Greek
           focus_areas:
@@ -102,6 +108,43 @@ class TestParseScheduleDays:
     def test_empty_list_raises(self):
         with pytest.raises(ValueError, match="cannot be empty"):
             _parse_schedule_days([])
+
+
+# ---------------------------------------------------------------------------
+# _parse_schedule_times
+# ---------------------------------------------------------------------------
+
+class TestParseScheduleTimes:
+    def test_none_defaults_to_nine_am(self):
+        assert _parse_schedule_times(None) == [(9, 0)]
+
+    def test_single_string(self):
+        assert _parse_schedule_times("14:30") == [(14, 30)]
+
+    def test_list_of_strings(self):
+        assert _parse_schedule_times(["09:00", "17:00"]) == [(9, 0), (17, 0)]
+
+    def test_midnight(self):
+        assert _parse_schedule_times(["00:00"]) == [(0, 0)]
+
+    def test_end_of_day(self):
+        assert _parse_schedule_times(["23:59"]) == [(23, 59)]
+
+    def test_invalid_format_raises(self):
+        with pytest.raises(ValueError, match="Invalid schedule time"):
+            _parse_schedule_times("9am")
+
+    def test_out_of_range_hour_raises(self):
+        with pytest.raises(ValueError, match="Invalid schedule time"):
+            _parse_schedule_times("24:00")
+
+    def test_out_of_range_minute_raises(self):
+        with pytest.raises(ValueError, match="Invalid schedule time"):
+            _parse_schedule_times("09:60")
+
+    def test_missing_colon_raises(self):
+        with pytest.raises(ValueError, match="Invalid schedule time"):
+            _parse_schedule_times("0900")
 
 
 # ---------------------------------------------------------------------------
@@ -291,20 +334,187 @@ class TestFindConfigFile:
 # ---------------------------------------------------------------------------
 
 class TestGetSecret:
-    @patch("keyring.get_password", return_value=None)
-    def test_falls_back_to_env_var(self, mock_kp, monkeypatch):
+    def test_falls_back_to_env_var_when_keyring_not_init(self, monkeypatch):
+        monkeypatch.setattr("maildigest.config._keyring", None)
         monkeypatch.setenv("MY_TEST_SECRET", "env_value")
         result = _get_secret("MY_TEST_SECRET", "some_kr_name")
         assert result == "env_value"
 
-    @patch("keyring.get_password", return_value=None)
-    def test_raises_when_neither_keychain_nor_env(self, mock_kp, monkeypatch):
+    def test_raises_when_neither_keyring_nor_env(self, monkeypatch):
+        monkeypatch.setattr("maildigest.config._keyring", None)
         monkeypatch.delenv("MY_TEST_SECRET", raising=False)
         with pytest.raises(ValueError, match="Missing required secret"):
             _get_secret("MY_TEST_SECRET", "some_kr_name")
 
-    @patch("keyring.get_password", return_value="kc_value")
-    def test_prefers_keychain_over_env(self, mock_kp, monkeypatch):
+    def test_prefers_keyring_over_env(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        mock_kr.get_password.return_value = "kc_value"
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
         monkeypatch.setenv("MY_TEST_SECRET", "env_value")
         result = _get_secret("MY_TEST_SECRET", "some_kr_name")
         assert result == "kc_value"
+
+
+# ---------------------------------------------------------------------------
+# Config schema validation
+# ---------------------------------------------------------------------------
+
+def _yaml_without(yaml_text: str, key: str) -> str:
+    """Remove a line containing `key:` from a YAML string."""
+    return "\n".join(
+        line for line in yaml_text.splitlines()
+        if not line.lstrip().startswith(f"{key}:")
+    )
+
+
+class TestConfigValidation:
+    def _load_invalid(self, yaml_text, tmp_path, monkeypatch):
+        cfg_file = tmp_path / "config.yaml"
+        cfg_file.write_text(yaml_text)
+        monkeypatch.setenv("MAILDIGEST_CONFIG", str(cfg_file))
+        with patch("maildigest.config._get_secret", return_value="any"), \
+             patch("maildigest.config._try_get_secret", return_value=None):
+            load_config()
+
+    def test_missing_imap_folder_raises(self, tmp_path, monkeypatch):
+        bad = _yaml_without(_YAML, "folder")
+        with pytest.raises(ValueError, match="imap.folder"):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+    def test_missing_schedule_days_raises(self, tmp_path, monkeypatch):
+        bad = _yaml_without(_YAML, "days")
+        with pytest.raises(ValueError, match="schedule.days"):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+    def test_missing_schedule_times_raises(self, tmp_path, monkeypatch):
+        bad = _yaml_without(_YAML, "times")
+        with pytest.raises(ValueError, match="schedule.times"):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+    def test_unknown_key_raises(self, tmp_path, monkeypatch):
+        bad = _YAML + "      typo_key: oops\n"
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+    def test_invalid_port_type_raises(self, tmp_path, monkeypatch):
+        bad = _YAML.replace("port: 993", "port: not-a-number")
+        with pytest.raises(ValueError):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+    def test_invalid_schedule_day_raises(self, tmp_path, monkeypatch):
+        bad = _YAML.replace("days: [mon, tue, wed, thu, fri]", "days: [mon, funday]")
+        with pytest.raises(ValueError, match="Invalid schedule day"):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+    def test_invalid_schedule_time_raises(self, tmp_path, monkeypatch):
+        bad = _YAML.replace('times: ["09:00"]', 'times: ["9am"]')
+        with pytest.raises(ValueError, match="Invalid schedule time"):
+            self._load_invalid(bad, tmp_path, monkeypatch)
+
+
+# ---------------------------------------------------------------------------
+# load_config — explicit path argument
+# ---------------------------------------------------------------------------
+
+class TestLoadConfigExplicitPath:
+    @patch("maildigest.config._try_get_secret", return_value=None)
+    @patch("maildigest.config._get_secret")
+    def test_explicit_path_overrides_env_var(self, mock_get, mock_try, tmp_path, monkeypatch):
+        cfg_file = tmp_path / "explicit.yaml"
+        cfg_file.write_text(_YAML)
+        monkeypatch.setenv("MAILDIGEST_CONFIG", str(tmp_path / "should_not_use.yaml"))
+        mock_get.return_value = "any"
+
+        cfg = load_config(str(cfg_file))
+        assert len(cfg.mailboxes) == 1
+
+    @patch("maildigest.config._try_get_secret", return_value=None)
+    @patch("maildigest.config._get_secret")
+    def test_nonexistent_explicit_path_raises(self, mock_get, mock_try, tmp_path, monkeypatch):
+        monkeypatch.delenv("MAILDIGEST_CONFIG", raising=False)
+        with pytest.raises(FileNotFoundError):
+            load_config(str(tmp_path / "nonexistent.yaml"))
+
+
+# ---------------------------------------------------------------------------
+# _try_get_secret
+# ---------------------------------------------------------------------------
+
+class TestTryGetSecret:
+    def test_returns_none_when_keyring_not_init(self, monkeypatch):
+        monkeypatch.setattr("maildigest.config._keyring", None)
+        assert _try_get_secret("any_key") is None
+
+    def test_returns_value_from_keyring(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        mock_kr.get_password.return_value = "stored_value"
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        assert _try_get_secret("imap:user@test.edu") == "stored_value"
+
+    def test_returns_none_when_key_not_found(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        mock_kr.get_password.return_value = None
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        assert _try_get_secret("missing_key") is None
+
+    def test_returns_none_on_keyring_exception(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        mock_kr.get_password.side_effect = Exception("keyring error")
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        assert _try_get_secret("any_key") is None
+
+
+# ---------------------------------------------------------------------------
+# store_credentials / store_anthropic_key
+# ---------------------------------------------------------------------------
+
+class TestStoreCredentials:
+    def test_raises_when_keyring_not_init(self, monkeypatch):
+        monkeypatch.setattr("maildigest.config._keyring", None)
+        with pytest.raises(RuntimeError, match="Call _init_keyring"):
+            store_credentials("user@test.edu", "pw")
+
+    def test_stores_imap_password(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        store_credentials("user@test.edu", "imap_pw")
+        mock_kr.set_password.assert_called_once_with(
+            "maildigest", "imap:user@test.edu", "imap_pw"
+        )
+
+    def test_stores_smtp_password_separately(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        store_credentials("user@test.edu", "imap_pw", "smtp_pw")
+        calls = {call.args[1]: call.args[2] for call in mock_kr.set_password.call_args_list}
+        assert calls["imap:user@test.edu"] == "imap_pw"
+        assert calls["smtp:user@test.edu"] == "smtp_pw"
+
+    def test_skips_none_passwords(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        store_credentials("user@test.edu", None, None)
+        mock_kr.set_password.assert_not_called()
+
+
+class TestStoreAnthropicKey:
+    def test_raises_when_keyring_not_init(self, monkeypatch):
+        monkeypatch.setattr("maildigest.config._keyring", None)
+        with pytest.raises(RuntimeError, match="Call _init_keyring"):
+            store_anthropic_key("sk-test")
+
+    def test_stores_under_correct_key(self, monkeypatch):
+        from unittest.mock import MagicMock
+        mock_kr = MagicMock()
+        monkeypatch.setattr("maildigest.config._keyring", mock_kr)
+        store_anthropic_key("sk-ant-test")
+        mock_kr.set_password.assert_called_once_with(
+            "maildigest", "anthropic_api_key", "sk-ant-test"
+        )

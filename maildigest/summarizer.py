@@ -49,7 +49,7 @@ def summarize_with_claude(
         return f"No newsletters received on {d.strftime('%B %d, %Y')}."
 
     prompt = _build_prompt(emails, mailbox, target_date)
-    log.info("Sending %d email(s) to Claude (%s) …", len(emails), model)
+    log.debug("Sending %d email(s) to Claude (%s) …", len(emails), model)
     log.debug("Prompt: %d chars, max_tokens: %d.", len(prompt), max_tokens)
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(

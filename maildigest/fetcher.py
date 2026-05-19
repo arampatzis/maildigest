@@ -60,7 +60,7 @@ def fetch_emails(
     ValueError
         If the requested IMAP folder cannot be opened.
     """
-    log.info(
+    log.debug(
         "Fetching emails from %s folder '%s': %s → %s",
         imap_server, mail_folder, from_dt, to_dt,
     )
@@ -81,7 +81,7 @@ def fetch_emails(
         _, message_ids = conn.search(None, f"(SINCE {since_str} BEFORE {before_str})")
 
         ids = message_ids[0].split()
-        log.info("Found %d candidate(s) in '%s'.", len(ids), mail_folder)
+        log.debug("Found %d candidate(s) in '%s'.", len(ids), mail_folder)
 
         emails = []
         for i, msg_id in enumerate(ids, 1):
@@ -158,4 +158,7 @@ def _decode_payload(part: email.message.Message) -> str:
     if not payload:
         return ""
     charset = part.get_content_charset() or "utf-8"
-    return payload.decode(charset, errors="replace")
+    try:
+        return payload.decode(charset, errors="replace")
+    except LookupError:
+        return payload.decode("utf-8", errors="replace")

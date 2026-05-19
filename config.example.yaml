@@ -18,20 +18,19 @@ mailboxes:
 
     imap:
       server: imap.uoc.gr
-      port: 993                    # default: 993
+      port: 993
       email: user@uoc.gr
-      folder: UOC-filtered.News    # IMAP folder to read from
+      folder: UOC-filtered.News    # required — IMAP folder to read from
 
     smtp:
       server: smtp.uoc.gr
-      port: 587                    # default: 587
+      port: 587
       # The digest is sent from/to imap.email (send-to-self).
       # Passwords are stored in the keychain — never here.
 
     schedule:
-      # Days this mailbox should be processed.
-      # Options: daily  OR  a list from: mon tue wed thu fri sat sun
-      days: [mon, tue, wed, thu, fri]
+      days: [mon, tue, wed, thu, fri]   # required — "daily" or list of: mon tue wed thu fri sat sun
+      times: ["09:00", "17:00"]         # required — one or more HH:MM times in 24-hour format
 
     summarizer:
       language: Greek              # language for the Claude summary output
@@ -71,14 +70,15 @@ mailboxes:
       server: imap.gmail.com
       port: 993
       email: you@gmail.com
-      folder: Newsletters
+      folder: Newsletters          # required
 
     smtp:
       server: smtp.gmail.com
       port: 587
 
     schedule:
-      days: [mon]                  # weekly digest every Monday
+      days: [mon]                  # required — weekly digest every Monday
+      times: ["09:00"]             # required
 
     summarizer:
       language: English

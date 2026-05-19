@@ -2,7 +2,7 @@
 
 import logging
 import smtplib
-from datetime import date
+from datetime import date, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -35,9 +35,10 @@ def send_email_summary(
     email_address: str,
     email_password: str,
     label: str,
-    target_date: date | None = None,
+    target_dt: datetime | None = None,
 ) -> None:
-    date_fmt = (target_date or date.today()).strftime("%B %d, %Y")
+    dt = target_dt or datetime.now()
+    date_fmt = dt.strftime("%B %d, %Y %H:%M")
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"{label} — {date_fmt}"
     msg["From"] = email_address

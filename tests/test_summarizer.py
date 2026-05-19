@@ -22,6 +22,7 @@ def _make_mailbox(**overrides) -> MailboxConfig:
         smtp_server="smtp.test",
         smtp_port=587,
         schedule_days=frozenset({"daily"}),
+        schedule_times=[(9, 0)],
         language="English",
         focus_areas=[],
         extra_instructions="",

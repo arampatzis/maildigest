@@ -88,6 +88,23 @@ class TestExtractPlainText:
         assert result == ""
 
 
+class TestDecodePayload:
+    def test_unknown_charset_falls_back_to_utf8(self):
+        from maildigest.fetcher import _decode_payload
+        msg = email.message_from_bytes(
+            b"Content-Type: text/plain; charset=x-unknown\n"
+            b"Content-Transfer-Encoding: base64\n\n"
+            + __import__("base64").b64encode("hello".encode("utf-8"))
+        )
+        result = _decode_payload(msg)
+        assert result == "hello"
+
+    def test_empty_payload_returns_empty_string(self):
+        from maildigest.fetcher import _decode_payload
+        msg = email.message_from_string("Content-Type: text/plain\n\n")
+        assert _decode_payload(msg) == ""
+
+
 class TestMatchesFilter:
     def test_exact_email_matches(self):
         assert _matches_filter("admin@uoc.gr", ["admin@uoc.gr"])
@@ -231,17 +248,23 @@ class TestFetchEmails:
         assert "08-May-2026" in search_arg
 
     @patch("maildigest.fetcher.imaplib.IMAP4_SSL")
-    def test_internaldate_filters_out_old_messages(self, mock_ssl_class):
+    def test_internaldate_filters_out_messages_outside_window(self, mock_ssl_class):
+        from datetime import timezone
         raw = _plain_bytes("Old", "sender@uni.edu", "old body")
         conn = MagicMock()
         mock_ssl_class.return_value = conn
         conn.select.return_value = ("OK", [None])
         conn.search.return_value = (None, [b"1"])
-        internaldate_header = b'1 (INTERNALDATE "06-May-2026 08:00:00 +0000" RFC822 {10})'
-        conn.fetch.return_value = (None, [(internaldate_header, raw)])
 
+        # Build an INTERNALDATE that is definitively one full day before from_dt
+        # in any timezone (UTC+14 to UTC-12), so the test is timezone-independent.
         from_dt = datetime(2026, 5, 6, 17, 0, 0)
         to_dt = datetime(2026, 5, 6, 23, 59, 59)
+        # "05-May-2026 00:00:00 +0000" is at most 14h ahead of from_dt local time,
+        # always outside [17:00, 23:59] local on May 6.
+        internaldate_header = b'1 (INTERNALDATE "05-May-2026 00:00:00 +0000" RFC822 {10})'
+        conn.fetch.return_value = (None, [(internaldate_header, raw)])
+
         result = fetch_emails("imap.test", 993, "u@uni.edu", "pwd", "Inbox",
                               from_dt=from_dt, to_dt=to_dt)
 

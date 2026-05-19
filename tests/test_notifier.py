@@ -102,17 +102,19 @@ class TestSendEmailSummaryTargetDate:
         from email.header import decode_header, make_header
         mock_server = MagicMock()
         mock_smtp_class.return_value.__enter__.return_value = mock_server
-        target = date(2026, 5, 6)
+        from datetime import datetime
+        target = datetime(2026, 5, 6, 9, 0)
 
         send_email_summary(
             _SUMMARY, "smtp.test", 587, "me@test.com", "secret", _LABEL,
-            target_date=target,
+            target_dt=target,
         )
 
         raw = mock_server.sendmail.call_args[0][2]
         parsed = email_lib.message_from_string(raw)
         subject = str(make_header(decode_header(parsed["Subject"])))
         assert "May 06, 2026" in subject
+        assert "09:00" in subject
 
 
 class TestSendEmailSummaryCharset:
