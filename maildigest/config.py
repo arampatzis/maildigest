@@ -245,17 +245,22 @@ def _parse_schedule_times(raw: str | list[str] | None) -> list[tuple[int, int]]:
 # ---------------------------------------------------------------------------
 
 
-def load_config(config_path: str | None = None) -> AppConfig:
+def validate_config_file(
+    config_path: str | None = None,
+) -> tuple[Path, "_AppSchema"]:
+    """Parse and schema-validate the config file without loading any secrets.
+
+    Returns the resolved path and the validated schema object.
+    Raises FileNotFoundError or ValueError on failure.
+    """
     path = Path(config_path).expanduser() if config_path else _find_config_file()
     if not path.exists():
         raise FileNotFoundError(
             f"Config file not found at {path}. "
             "Copy config.yaml.example there and fill in your settings."
         )
-
     with path.open() as f:
         raw = yaml.safe_load(f)
-
     try:
         schema = _AppSchema.model_validate(raw)
     except ValidationError as exc:
@@ -264,6 +269,11 @@ def load_config(config_path: str | None = None) -> AppConfig:
             loc = ".".join(str(part) for part in error["loc"])
             lines.append(f"  {loc}: {error['msg']}")
         raise ValueError("\n".join(lines)) from None
+    return path, schema
+
+
+def load_config(config_path: str | None = None) -> AppConfig:
+    _, schema = validate_config_file(config_path)
 
     anthropic_key = _get_secret("ANTHROPIC_API_KEY", "anthropic_api_key")
     global_summary_dir = Path(schema.summary_dir).expanduser()

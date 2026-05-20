@@ -22,12 +22,15 @@ from maildigest.config import (
     MailboxConfig,
     _find_config_file,
     _init_keyring,
+    _parse_schedule_days,
+    _parse_schedule_times,
     _try_get_secret,
     is_scheduled_today,
     load_config,
     read_last_run,
     store_anthropic_key,
     store_credentials,
+    validate_config_file,
     write_last_run,
 )
 from maildigest.fetcher import fetch_emails
@@ -236,6 +239,9 @@ def run(
     today = date.today()
 
     mailboxes = [mb for mb in cfg.mailboxes if mb.enabled]
+    if not mailboxes:
+        log.info("No enabled mailboxes configured.")
+        return
     if mailbox_filter:
         mailboxes = [mb for mb in mailboxes if mb.name == mailbox_filter]
         if not mailboxes:
@@ -303,15 +309,23 @@ def list_mailboxes() -> None:
     """Show all configured mailboxes and their status."""
     cfg_path = _find_config_file()
     if not cfg_path.exists():
-        _console.print(f"[yellow]No config file found at {cfg_path}[/yellow]")
-        _console.print("Copy config.yaml.example there to get started.")
+        _console.print(
+            f"[yellow]No config file found at {escape(str(cfg_path))}[/yellow]"
+        )
+        _console.print(
+            "[italic]Copy config.yaml.example there to get started.[/italic]"
+        )
         return
 
     with cfg_path.open() as f:
         raw = yaml.safe_load(f) or {}
 
     _console.print(f"[italic]Config: {cfg_path}[/italic]\n")
-    for mb in raw.get("mailboxes", []):
+    mailboxes = raw.get("mailboxes", [])
+    if not mailboxes:
+        _console.print("[yellow]No mailboxes configured.[/yellow]")
+        return
+    for mb in mailboxes:
         name = mb["name"]
         label = mb.get("label", name)
         enabled = mb.get("enabled", True)
@@ -464,6 +478,7 @@ def config_setup() -> None:
             store_credentials(email, imap_pwd or None, smtp_pwd or None)
 
     _console.print("\n[green]All credentials stored successfully.[/green]")
+    log.info("config setup: credentials stored.")
 
 
 def _check_anthropic_key(api_key: str) -> str | None:
@@ -517,6 +532,69 @@ def _check_smtp(server: str, port: int, email: str, password: str) -> str | None
         return str(exc)
 
 
+@config.command("validate")
+def config_validate() -> None:
+    """Validate config file structure without loading secrets or network."""
+    try:
+        path, schema = validate_config_file()
+    except FileNotFoundError as exc:
+        _console.print(f"[red]Error:[/red] {escape(str(exc))}")
+        log.error("config validate: %s", exc)
+        raise SystemExit(1) from exc
+    except ValueError as exc:
+        lines = str(exc).splitlines()
+        _console.print(f"[red]{escape(lines[0])}[/red]")
+        for line in lines[1:]:
+            field, _, msg = line.strip().partition(": ")
+            _console.print(f"  [yellow]{escape(field)}[/yellow]: {escape(msg)}")
+        log.error("config validate: %s", exc)
+        raise SystemExit(1) from exc
+
+    _console.print(f"[italic]{escape(str(path))}[/italic]")
+    _console.rule()
+    for mb in schema.mailboxes:
+        status = "[green]enabled[/green]" if mb.enabled else "[italic]disabled[/italic]"
+        label = escape(mb.label or mb.name)
+        days = _parse_schedule_days(mb.schedule.days)
+        times = _parse_schedule_times(mb.schedule.times)
+        days_str = (
+            "daily"
+            if "daily" in days
+            else ",".join(
+                sorted(
+                    days, key=["mon", "tue", "wed", "thu", "fri", "sat", "sun"].index
+                )
+            )
+        )
+        times_str = ", ".join(f"{h:02d}:{m:02d}" for h, m in times)
+        _console.print(f"  [bold]{label}[/bold]  {status}")
+        _console.print(
+            f"    [italic]schedule[/italic]  "
+            f"[yellow]{days_str}[/yellow] at [cyan]{times_str}[/cyan]"
+        )
+        _console.print(
+            f"    [italic]imap    [/italic]  "
+            f"[blue]{escape(mb.imap.server)}:{mb.imap.port}[/blue]"
+            f"  [italic]{escape(mb.imap.folder)}[/italic]"
+        )
+        _console.print(
+            f"    [italic]smtp    [/italic]  "
+            f"[blue]{escape(mb.smtp.server)}:{mb.smtp.port}[/blue]"
+        )
+    _console.rule()
+    enabled = sum(1 for mb in schema.mailboxes if mb.enabled)
+    disabled = len(schema.mailboxes) - enabled
+    _console.print(
+        f"[green]Valid.[/green]  "
+        f"{len(schema.mailboxes)} mailbox(es) — {enabled} enabled, {disabled} disabled."
+    )
+    log.info(
+        "config validate: valid — %d mailbox(es), %d enabled.",
+        len(schema.mailboxes),
+        enabled,
+    )
+
+
 @config.command("check")
 def config_check() -> None:
     """Verify IMAP/SMTP login and folder accessibility for all configured mailboxes."""
@@ -531,7 +609,7 @@ def config_check() -> None:
 
     mailboxes = [mb for mb in cfg.mailboxes if mb.enabled]
     if not mailboxes:
-        click.echo("No enabled mailboxes to check.")
+        _console.print("[yellow]No enabled mailboxes to check.[/yellow]")
         return
 
     all_ok = True
@@ -559,14 +637,15 @@ def config_check() -> None:
         )
         if err:
             _console.print(
-                f"  {mb.imap_server}:{mb.imap_port}  {escape(mb.email)}  "
-                f"[red]FAILED[/red]: {escape(err)}"
+                f"  [blue]{mb.imap_server}:{mb.imap_port}[/blue]"
+                f"  [cyan]{escape(mb.email)}[/cyan]"
+                f"  [red]FAILED[/red]: {escape(err)}"
             )
             all_ok = False
         else:
             _console.print(
-                f"  {mb.imap_server}:{mb.imap_port}  {escape(mb.email)}"
-                "  [green]OK[/green]"
+                f"  [blue]{mb.imap_server}:{mb.imap_port}[/blue]"
+                f"  [cyan]{escape(mb.email)}[/cyan]  [green]OK[/green]"
             )
             imap_ok.add(key)
 
@@ -581,14 +660,15 @@ def config_check() -> None:
         err = _check_smtp(mb.smtp_server, mb.smtp_port, mb.email, mb.smtp_password)
         if err:
             _console.print(
-                f"  {mb.smtp_server}:{mb.smtp_port}  {escape(mb.email)}  "
-                f"[red]FAILED[/red]: {escape(err)}"
+                f"  [blue]{mb.smtp_server}:{mb.smtp_port}[/blue]"
+                f"  [cyan]{escape(mb.email)}[/cyan]"
+                f"  [red]FAILED[/red]: {escape(err)}"
             )
             all_ok = False
         else:
             _console.print(
-                f"  {mb.smtp_server}:{mb.smtp_port}  {escape(mb.email)}"
-                "  [green]OK[/green]"
+                f"  [blue]{mb.smtp_server}:{mb.smtp_port}[/blue]"
+                f"  [cyan]{escape(mb.email)}[/cyan]  [green]OK[/green]"
             )
 
     # IMAP folders — one check per mailbox; skip if login failed for that account
@@ -597,8 +677,9 @@ def config_check() -> None:
         key = (mb.imap_server, mb.imap_port, mb.email)
         if key not in imap_ok:
             _console.print(
-                f"  [{escape(mb.label)}]  {escape(mb.imap_folder)}  "
-                f"[italic]skipped (login failed)[/italic]"
+                f"  [bold]{escape(mb.label)}[/bold]"
+                f"  [italic]{escape(mb.imap_folder)}[/italic]"
+                f"  [italic]skipped (login failed)[/italic]"
             )
             continue
         err = _check_imap_folder(
@@ -606,24 +687,28 @@ def config_check() -> None:
         )
         if err:
             _console.print(
-                f"  [{escape(mb.label)}]  {escape(mb.imap_folder)}  "
-                f"[red]FAILED[/red]: {escape(err)}"
+                f"  [bold]{escape(mb.label)}[/bold]"
+                f"  [italic]{escape(mb.imap_folder)}[/italic]"
+                f"  [red]FAILED[/red]: {escape(err)}"
             )
             all_ok = False
         else:
             _console.print(
-                f"  [{escape(mb.label)}]  {escape(mb.imap_folder)}  [green]OK[/green]"
+                f"  [bold]{escape(mb.label)}[/bold]"
+                f"  [italic]{escape(mb.imap_folder)}[/italic]  [green]OK[/green]"
             )
 
     _console.rule()
     if all_ok:
         _console.print("[green]All checks passed.[/green]")
+        log.info("config check: all checks passed.")
     else:
         _console.print("[red]Some checks failed.[/red]")
+        log.warning("config check: some checks failed.")
         sys.exit(1)
 
 
-@main.command()
+@main.command(hidden=True)
 @click.option("--config", "cfg_path", default=None, help="Path to config.yaml.")
 def daemon(cfg_path: str | None) -> None:
     """Run the long-lived scheduler daemon."""
@@ -658,10 +743,10 @@ def service_install() -> None:
     except subprocess.CalledProcessError as exc:
         log.exception("Command failed: %s", exc)
         sys.exit(1)
-    _console.print("\n[green]Service installed and enabled.[/green]")
-    _console.print("  Start:  [bold]maildigest service start[/bold]")
-    _console.print("  Status: [bold]maildigest service status[/bold]")
-    _console.print("  Logs:   [bold]maildigest service log[/bold]")
+    log.info("Service installed and enabled.")
+    _console.print("  [italic]Start:[/italic]   [bold]maildigest service start[/bold]")
+    _console.print("  [italic]Status:[/italic]  [bold]maildigest service status[/bold]")
+    _console.print("  [italic]Logs:[/italic]    [bold]maildigest service log[/bold]")
 
 
 @service.command("uninstall")
@@ -690,7 +775,7 @@ def service_start() -> None:
         text=True,
     ).stdout.strip()
     if state in ("active", "activating"):
-        _console.print("[yellow]Service is already running.[/yellow]")
+        log.info("Service is already running.")
         subprocess.run(
             ["systemctl", "--user", "status", "maildigest", "--no-pager", "-l"],
             check=False,
@@ -731,7 +816,7 @@ def service_stop() -> None:
     except subprocess.CalledProcessError as exc:
         log.exception("systemctl failed: %s", exc)
         sys.exit(1)
-    _console.print("[yellow]Service stopped.[/yellow]")
+    log.info("Service stopped.")
 
 
 @service.command("reload")
@@ -739,6 +824,7 @@ def service_reload() -> None:
     """Reload config without restarting (sends SIGHUP to the daemon)."""
     try:
         subprocess.run(["systemctl", "--user", "reload", "maildigest"], check=True)
+        log.info("Config reloaded.")
     except subprocess.CalledProcessError as exc:
         log.exception("systemctl failed: %s", exc)
         sys.exit(1)
