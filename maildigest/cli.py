@@ -37,6 +37,7 @@ from maildigest.fetcher import fetch_emails
 from maildigest.notifier import (
     save_to_markdown,
     send_email_summary,
+    send_error_notification,
 )
 from maildigest.summarizer import summarize_with_claude
 
@@ -108,68 +109,92 @@ def _run_mailbox_digest(
             else datetime.combine(date.today(), dt_time.min)
         )
 
-    log.info(
-        "[%s] Fetching %s → %s",
-        mb.label,
-        from_dt.strftime("%Y-%m-%d %H:%M:%S"),
-        to_dt.strftime("%Y-%m-%d %H:%M:%S"),
-    )
+    try:
+        log.info(
+            "[%s] Fetching %s → %s",
+            mb.label,
+            from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            to_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        )
 
-    emails = fetch_emails(
-        imap_server=mb.imap_server,
-        imap_port=mb.imap_port,
-        email_address=mb.email,
-        email_password=mb.imap_password,
-        mail_folder=mb.imap_folder,
-        from_dt=from_dt,
-        to_dt=to_dt,
-        body_char_limit=mb.body_char_limit,
-        sender_filter=mb.sender_filter or None,
-    )
+        emails = fetch_emails(
+            imap_server=mb.imap_server,
+            imap_port=mb.imap_port,
+            email_address=mb.email,
+            email_password=mb.imap_password,
+            mail_folder=mb.imap_folder,
+            from_dt=from_dt,
+            to_dt=to_dt,
+            body_char_limit=mb.body_char_limit,
+            sender_filter=mb.sender_filter or None,
+        )
 
-    log.info("[%s] Found %d email(s) in '%s'.", mb.label, len(emails), mb.imap_folder)
+        log.info(
+            "[%s] Found %d email(s) in '%s'.", mb.label, len(emails), mb.imap_folder
+        )
 
-    if not emails:
-        log.info("[%s] No new emails — skipping summary.", mb.label)
+        if not emails:
+            log.info("[%s] No new emails — skipping summary.", mb.label)
+            if update_last_run:
+                write_last_run(mb.name, to_dt)
+            return
+
+        log.info("[%s] Summarising %d email(s) with Claude …", mb.label, len(emails))
+        summary = summarize_with_claude(
+            emails,
+            mailbox=mb,
+            api_key=api_key,
+            target_date=to_dt.date(),
+        )
+
+        if print_summary:
+            _console.rule(f"[bold]{mb.label}[/bold]  {to_dt.date()}")
+            _console.print(Markdown(summary))
+            _console.rule()
+        else:
+            log.info("[%s] Summary generated (%d chars).", mb.label, len(summary))
+
+        if dry_run:
+            log.info("[%s] Dry run — skipped save and email.", mb.label)
+            return
+
+        path = save_to_markdown(
+            summary, mb.summary_dir, mb.label, target_date=to_dt.date()
+        )
+        log.info("[%s] Saved → %s", mb.label, path)
+
+        send_email_summary(
+            summary=summary,
+            smtp_server=mb.smtp_server,
+            smtp_port=mb.smtp_port,
+            email_address=mb.email,
+            email_password=mb.smtp_password,
+            label=mb.label,
+            target_dt=to_dt,
+        )
+        log.info("[%s] Digest emailed to %s.", mb.label, mb.email)
+
         if update_last_run:
             write_last_run(mb.name, to_dt)
-        return
 
-    log.info("[%s] Summarising %d email(s) with Claude …", mb.label, len(emails))
-    summary = summarize_with_claude(
-        emails,
-        mailbox=mb,
-        api_key=api_key,
-        target_date=to_dt.date(),
-    )
-
-    if print_summary:
-        _console.rule(f"[bold]{mb.label}[/bold]  {to_dt.date()}")
-        _console.print(Markdown(summary))
-        _console.rule()
-    else:
-        log.info("[%s] Summary generated (%d chars).", mb.label, len(summary))
-
-    if dry_run:
-        log.info("[%s] Dry run — skipped save and email.", mb.label)
-        return
-
-    path = save_to_markdown(summary, mb.summary_dir, mb.label, target_date=to_dt.date())
-    log.info("[%s] Saved → %s", mb.label, path)
-
-    send_email_summary(
-        summary=summary,
-        smtp_server=mb.smtp_server,
-        smtp_port=mb.smtp_port,
-        email_address=mb.email,
-        email_password=mb.smtp_password,
-        label=mb.label,
-        target_dt=to_dt,
-    )
-    log.info("[%s] Digest emailed to %s.", mb.label, mb.email)
-
-    if update_last_run:
-        write_last_run(mb.name, to_dt)
+    except Exception as exc:
+        log.exception("[%s] Failed: %s", mb.label, exc)
+        if not dry_run:
+            try:
+                send_error_notification(
+                    exc,
+                    smtp_server=mb.smtp_server,
+                    smtp_port=mb.smtp_port,
+                    email_address=mb.email,
+                    email_password=mb.smtp_password,
+                    label=mb.label,
+                    from_dt=from_dt,
+                    to_dt=to_dt,
+                )
+                log.info("[%s] Error notification sent.", mb.label)
+            except Exception:
+                log.exception("[%s] Also failed to send error notification.", mb.label)
+        raise
 
 
 @click.group()
@@ -296,8 +321,7 @@ def run(
                     from_dt = last_run_dt
                 _run_mailbox_digest(mb, cfg.anthropic_api_key, from_dt, to_dt, dry_run)
         except Exception as exc:
-            log.exception("[%s] Failed: %s", mb.label, exc)
-            log.debug("Traceback:", exc_info=True)
+            log.debug("[%s] Caught at run level: %s", mb.label, exc)
             failed.append(mb.label)
 
     if failed:

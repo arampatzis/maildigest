@@ -9,7 +9,7 @@ from maildigest.config import MailboxConfig
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+_DEFAULT_MODEL = "claude-sonnet-4-6"
 _DEFAULT_MAX_TOKENS = 2048
 
 

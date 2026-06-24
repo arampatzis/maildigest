@@ -1,11 +1,14 @@
 """Tests for maildigest.notifier."""
 
-from datetime import date, timedelta
+import email as email_lib
+from datetime import date, datetime, timedelta
+from email.header import decode_header, make_header
 from unittest.mock import MagicMock, patch
 
 from maildigest.notifier import (
     save_to_markdown,
     send_email_summary,
+    send_error_notification,
 )
 
 _SUMMARY = "Key announcements:\n- Event on Friday\n- Deadline Monday"
@@ -137,3 +140,97 @@ class TestSendEmailSummaryCharset:
             greek_summary, "smtp.test", 587, "me@test.com", "secret", _LABEL
         )
         mock_server.sendmail.assert_called_once()
+
+
+class TestSendErrorNotification:
+    _FROM_DT = datetime(2026, 6, 12, 17, 0, 0)
+    _TO_DT = datetime(2026, 6, 23, 17, 0, 0)
+
+    @patch("maildigest.notifier.smtplib.SMTP")
+    def test_authenticates_with_starttls(self, mock_smtp_class):
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+        send_error_notification(
+            ValueError("boom"), "smtp.test", 587, "me@test.com", "secret", _LABEL
+        )
+        mock_server.starttls.assert_called_once()
+        mock_server.login.assert_called_once_with("me@test.com", "secret")
+
+    @patch("maildigest.notifier.smtplib.SMTP")
+    def test_sends_to_self(self, mock_smtp_class):
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+        send_error_notification(
+            RuntimeError("oops"), "smtp.test", 587, "me@test.com", "secret", _LABEL
+        )
+        args = mock_server.sendmail.call_args[0]
+        assert args[0] == "me@test.com"
+        assert args[1] == "me@test.com"
+
+    @patch("maildigest.notifier.smtplib.SMTP")
+    def test_subject_contains_error_marker_and_label(self, mock_smtp_class):
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+        send_error_notification(
+            ValueError("x"), "smtp.test", 587, "me@test.com", "secret", "My Box"
+        )
+        raw = mock_server.sendmail.call_args[0][2]
+        parsed = email_lib.message_from_string(raw)
+        subject = str(make_header(decode_header(parsed["Subject"])))
+        assert "[maildigest ERROR]" in subject
+        assert "My Box" in subject
+
+    @patch("maildigest.notifier.smtplib.SMTP")
+    def test_body_contains_error_type_and_message(self, mock_smtp_class):
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+        send_error_notification(
+            ValueError("something went wrong"),
+            "smtp.test",
+            587,
+            "me@test.com",
+            "secret",
+            _LABEL,
+        )
+        raw = mock_server.sendmail.call_args[0][2]
+        parsed = email_lib.message_from_string(raw)
+        body = parsed.get_payload(0).get_payload(decode=True).decode()
+        assert "ValueError" in body
+        assert "something went wrong" in body
+
+    @patch("maildigest.notifier.smtplib.SMTP")
+    def test_body_contains_fetch_window(self, mock_smtp_class):
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+        send_error_notification(
+            RuntimeError("fail"),
+            "smtp.test",
+            587,
+            "me@test.com",
+            "secret",
+            _LABEL,
+            from_dt=self._FROM_DT,
+            to_dt=self._TO_DT,
+        )
+        raw = mock_server.sendmail.call_args[0][2]
+        parsed = email_lib.message_from_string(raw)
+        body = parsed.get_payload(0).get_payload(decode=True).decode()
+        assert "2026-06-12 17:00:00" in body
+        assert "2026-06-23 17:00:00" in body
+
+    @patch("maildigest.notifier.smtplib.SMTP")
+    def test_body_without_fetch_window_when_none(self, mock_smtp_class):
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+        send_error_notification(
+            RuntimeError("fail"),
+            "smtp.test",
+            587,
+            "me@test.com",
+            "secret",
+            _LABEL,
+        )
+        raw = mock_server.sendmail.call_args[0][2]
+        parsed = email_lib.message_from_string(raw)
+        body = parsed.get_payload(0).get_payload(decode=True).decode()
+        assert "Fetch window" not in body

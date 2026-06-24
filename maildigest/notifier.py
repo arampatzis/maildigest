@@ -2,6 +2,7 @@
 
 import logging
 import smtplib
+import traceback as _traceback
 from datetime import date, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -57,3 +58,47 @@ def send_email_summary(
         server.login(email_address, email_password)
         server.sendmail(email_address, email_address, msg.as_string())
     log.debug("Email delivered to %s.", email_address)
+
+
+def send_error_notification(
+    exc: Exception,
+    smtp_server: str,
+    smtp_port: int,
+    email_address: str,
+    email_password: str,
+    label: str,
+    from_dt: datetime | None = None,
+    to_dt: datetime | None = None,
+) -> None:
+    dt = datetime.now()
+    date_fmt = dt.strftime("%B %d, %Y %H:%M")
+    subject = f"[maildigest ERROR] {label} — {date_fmt}"
+
+    window = ""
+    if from_dt is not None and to_dt is not None:
+        window = (
+            f"Fetch window : {from_dt.strftime('%Y-%m-%d %H:%M:%S')}"
+            f" → {to_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
+
+    tb = _traceback.format_exc()
+    body = (
+        f"maildigest failed for mailbox: {label}\n"
+        f"Time         : {date_fmt}\n"
+        f"{window}"
+        f"\nError: {type(exc).__name__}: {exc}\n"
+        f"\nTraceback:\n{tb}"
+    )
+
+    msg = MIMEMultipart()
+    msg["Subject"] = subject
+    msg["From"] = email_address
+    msg["To"] = email_address
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    log.debug("Sending error notification to %s.", email_address)
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(email_address, email_password)
+        server.sendmail(email_address, email_address, msg.as_string())
+    log.debug("Error notification delivered to %s.", email_address)
