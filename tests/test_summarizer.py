@@ -99,6 +99,28 @@ class TestBuildPrompt:
         prompt = _build_prompt(_EMAILS, mb)
         assert "Join us Tue." in prompt
 
+    def test_date_range_appears_when_from_differs(self):
+        from_d = date(2026, 6, 12)
+        to_d = date(2026, 6, 26)
+        prompt = _build_prompt(_EMAILS, _MB, from_date=from_d, target_date=to_d)
+        assert "June 12, 2026" in prompt
+        assert "June 26, 2026" in prompt
+
+    def test_single_date_when_from_equals_to(self):
+        d = date(2026, 6, 26)
+        prompt = _build_prompt(_EMAILS, _MB, from_date=d, target_date=d)
+        assert "June 26, 2026" in prompt
+        assert "between" not in prompt
+
+    def test_custom_prompt_includes_label_and_date_range(self):
+        mb = _make_mailbox(custom_prompt="Summarize:", label="SPOK")
+        from_d = date(2026, 6, 12)
+        to_d = date(2026, 6, 26)
+        prompt = _build_prompt(_EMAILS, mb, from_date=from_d, target_date=to_d)
+        assert "SPOK" in prompt
+        assert "June 12, 2026" in prompt
+        assert "June 26, 2026" in prompt
+
 
 class TestSummarizeWithClaude:
     def test_empty_list_returns_no_newsletters_message(self):

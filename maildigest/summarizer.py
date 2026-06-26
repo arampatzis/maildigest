@@ -10,7 +10,7 @@ from maildigest.config import MailboxConfig
 log = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "claude-sonnet-4-6"
-_DEFAULT_MAX_TOKENS = 2048
+_DEFAULT_MAX_TOKENS = 8192
 
 
 def summarize_with_claude(
@@ -19,6 +19,7 @@ def summarize_with_claude(
     api_key: str,
     model: str = _DEFAULT_MODEL,
     max_tokens: int = _DEFAULT_MAX_TOKENS,
+    from_date: date | None = None,
     target_date: date | None = None,
 ) -> str:
     """
@@ -36,19 +37,22 @@ def summarize_with_claude(
         Claude model identifier.
     max_tokens : int, optional
         Maximum tokens in the response.
+    from_date : date | None, optional
+        Start of the fetch window. When different from target_date the prompt
+        describes a date range rather than a single day.
     target_date : date | None, optional
-        Date the newsletters were received. Defaults to today when ``None``.
+        End of the fetch window. Defaults to today when ``None``.
 
     Returns
     -------
     str
         Structured summary produced by Claude.
     """
+    to_d = target_date or date.today()
     if not emails:
-        d = target_date or date.today()
-        return f"No newsletters received on {d.strftime('%B %d, %Y')}."
+        return f"No newsletters received on {to_d.strftime('%B %d, %Y')}."
 
-    prompt = _build_prompt(emails, mailbox, target_date)
+    prompt = _build_prompt(emails, mailbox, from_date, to_d)
     log.debug("Sending %d email(s) to Claude (%s) …", len(emails), model)
     log.debug("Prompt: %d chars, max_tokens: %d.", len(prompt), max_tokens)
     client = anthropic.Anthropic(api_key=api_key)
@@ -65,6 +69,7 @@ def summarize_with_claude(
 def _build_prompt(
     emails: list[dict],
     mailbox: MailboxConfig,
+    from_date: date | None = None,
     target_date: date | None = None,
 ) -> str:
     """
@@ -75,8 +80,22 @@ def _build_prompt(
     assembled from ``mailbox.language``, ``mailbox.focus_areas``, and
     ``mailbox.extra_instructions``.
     """
-    d = target_date or date.today()
-    date_fmt = d.strftime("%A, %B %d, %Y")
+    to_d = target_date or date.today()
+    from_d = from_date if from_date and from_date != to_d else None
+
+    if from_d:
+        date_clause = (
+            f"received between {from_d.strftime('%A, %B %d, %Y')} "
+            f"and {to_d.strftime('%A, %B %d, %Y')}"
+        )
+        overview_period = (
+            f"the period from {from_d.strftime('%B %d')}"
+            f" to {to_d.strftime('%B %d, %Y')}"
+        )
+    else:
+        date_clause = f"received on {to_d.strftime('%A, %B %d, %Y')}"
+        overview_period = "the day's newsletters"
+
     body = "\n".join(
         f"--- Email {i} ---\n"
         f"From: {em['from']}\n"
@@ -86,7 +105,14 @@ def _build_prompt(
     )
 
     if mailbox.custom_prompt:
-        return f"{mailbox.custom_prompt}\n\n{body}"
+        return (
+            f"{mailbox.custom_prompt}\n\n"
+            f"The following {len(emails)} "
+            f"{'message was' if len(emails) == 1 else 'messages were'} "
+            f"{date_clause}. "
+            f"The organisation name is: {mailbox.label}.\n\n"
+            f"{body}"
+        )
 
     focus_section = ""
     if mailbox.focus_areas:
@@ -114,7 +140,7 @@ def _build_prompt(
         f"List every grant call, funding opportunity, scholarship, or financial "
         f"deadline mentioned. If none are present write 'None.'\n\n"
         f"## Overview\n"
-        f"2-3 sentence summary of the day's newsletters.\n\n"
+        f"2-3 sentence summary of {overview_period}.\n\n"
         f"## Announcements & Events\n"
         f"One bullet per announcement or event, including date/time when given.\n\n"
         f"## Action Items\n"
@@ -123,6 +149,6 @@ def _build_prompt(
         f"{extra}\n"
         f"Below are {len(emails)} "
         f"{'newsletter' if len(emails) == 1 else 'newsletters'} "
-        f"received on {date_fmt}:\n\n"
+        f"{date_clause}:\n\n"
         f"{body}"
     )

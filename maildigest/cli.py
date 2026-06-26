@@ -144,6 +144,7 @@ def _run_mailbox_digest(
             emails,
             mailbox=mb,
             api_key=api_key,
+            from_date=from_dt.date(),
             target_date=to_dt.date(),
         )
 
